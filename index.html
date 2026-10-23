@@ -2,6 +2,7 @@
 <html lang="zh-Hant-TW">
 <head>
 <meta charset="utf-8">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("huikao-theme")||"dark"}catch(e){document.documentElement.dataset.theme="dark"}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>會考五科刷題本</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,15 +19,16 @@ body{margin:0}
   --s-chi:#a4473a; --s-eng:#2f63a8; --s-math:#7a4fa3; --s-sci:#2d7f74; --s-soc:#a87a1e;
   --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
   --f-num:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --cd-bg:#22262b; --cd-ink:#fbfaf8;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --paper:#17191c; --card:#202327; --ink:#ecebe8; --muted:#a29c96; --line:#3a2c30;
   --mark:#f07a8b; --mark-soft:#3a2128; --ok:#6cc79a; --ok-soft:#1d3329; --bad:#f08f74; --bad-soft:#3a241d;
-  --s-chi:#e28a7c; --s-eng:#7fa8e6; --s-math:#b996e0; --s-sci:#6fc4b8; --s-soc:#e0b55c; color-scheme:dark}}
+  --s-chi:#e28a7c; --s-eng:#7fa8e6; --s-math:#b996e0; --s-sci:#6fc4b8; --s-soc:#e0b55c; --cd-bg:#2a2e34; --cd-ink:#ecebe8; color-scheme:dark}}
 :root[data-theme="dark"]{
   --paper:#17191c; --card:#202327; --ink:#ecebe8; --muted:#a29c96; --line:#3a2c30;
   --mark:#f07a8b; --mark-soft:#3a2128; --ok:#6cc79a; --ok-soft:#1d3329; --bad:#f08f74; --bad-soft:#3a241d;
-  --s-chi:#e28a7c; --s-eng:#7fa8e6; --s-math:#b996e0; --s-sci:#6fc4b8; --s-soc:#e0b55c; color-scheme:dark}
+  --s-chi:#e28a7c; --s-eng:#7fa8e6; --s-math:#b996e0; --s-sci:#6fc4b8; --s-soc:#e0b55c; --cd-bg:#2a2e34; --cd-ink:#ecebe8; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:18px;line-height:1.6;
   background-image:repeating-linear-gradient(0deg,transparent 0 35px,var(--line) 35px 36px);}
@@ -120,15 +122,17 @@ button.srow:hover{background:var(--mark-soft)}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
 .fastb{font-style:normal;color:var(--bad);font-size:.85rem;font-weight:700;white-space:nowrap}
 
-.cd{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;background:var(--ink);color:var(--paper);border-radius:6px;padding:14px 18px}
+.cd{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;background:var(--cd-bg);color:var(--cd-ink);border-radius:6px;padding:14px 18px}
 .cd-label{font-weight:900;font-size:1.05rem;display:flex;flex-direction:column;line-height:1.3;margin-right:auto}
 .cd-label small{font-weight:500;font-size:.82rem;opacity:.75}
 .cd-cell{display:flex;align-items:baseline;gap:4px}
-.cd-cell b{font-family:var(--f-num);font-size:2rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--paper);min-width:1.4em;text-align:right}
+.cd-cell b{font-family:var(--f-num);font-size:2rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--cd-ink);min-width:1.4em;text-align:right}
 .cd-cell:first-of-type b{color:var(--mark)}
 .cd-cell i{font-style:normal;font-size:.9rem;opacity:.8}
 @media (max-width:480px){.cd-label{width:100%}.cd-cell b{font-size:1.6rem}}
 .tabs{flex-wrap:wrap}
+.theme{font:inherit;font-size:1rem;font-weight:700;padding:8px 14px;border:2px solid var(--muted);background:transparent;color:var(--muted);border-radius:999px;cursor:pointer}
+.theme:hover{color:var(--ink);border-color:var(--ink)}
 .report h3{margin:6px 0 0;font-size:1.05rem;font-weight:900;border-left:4px solid var(--mark);padding-left:8px}
 .rep-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:flex-start}
 .rep-head p{margin:2px 0 0}
@@ -178,6 +182,7 @@ button.srow:hover{background:var(--mark-soft)}
       <button class="tab" id="tab-prog" role="tab" aria-selected="false">練習紀錄</button>
       <button class="tab" id="tab-rep" role="tab" aria-selected="false">學習報告</button>
     </div>
+    <button class="theme" id="themeBtn" type="button"></button>
   </header>
   <main id="view"></main>
   <p class="note" id="saveNote">紀錄儲存中…</p>
@@ -857,6 +862,10 @@ function setTab(t){
 document.getElementById("tab-play").onclick=()=>setTab("play");
 document.getElementById("tab-prog").onclick=()=>setTab("prog");
 document.getElementById("tab-rep").onclick=()=>setTab("rep");
+const themeBtn=document.getElementById("themeBtn");
+function paintThemeBtn(){const dark=document.documentElement.dataset.theme==="dark";themeBtn.textContent=dark?"☀️ 亮色":"🌙 暗色";themeBtn.setAttribute("aria-label",dark?"切換成亮色":"切換成暗色")}
+themeBtn.onclick=()=>{const t=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=t;try{localStorage.setItem("huikao-theme",t)}catch(e){}paintThemeBtn()};
+paintThemeBtn();
 /* ===== 會考倒數 ===== */
 const EXAM=new Date("2027-05-15T08:30:00+08:00");
 function tickCountdown(){
