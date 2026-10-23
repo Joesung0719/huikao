@@ -115,7 +115,11 @@ button.srow:hover{background:var(--mark-soft)}
 .passage.small{font-size:.92rem;padding:8px 12px}
 .listen{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .listen .next{align-self:auto}
-.say{font-style:italic;color:var(--muted)}
+.say{font-style:italic;color:var(--muted);white-space:pre-line}
+.listen b{white-space:pre-line}
+/* 試題圖片：白底，暗色主題下也看得清楚 */
+.qimg{display:block;max-width:100%;height:auto;margin:0 auto;background:#fff;border-radius:6px;padding:6px}
+a+a>.qimg{margin-top:8px}
 .dunno{align-self:flex-start;font:inherit;font-size:1rem;color:var(--muted);background:transparent;border:1.5px dashed var(--muted);border-radius:6px;padding:8px 16px;cursor:pointer}
 .dunno:hover{color:var(--ink);border-color:var(--ink)}
 .slow{background:var(--mark-soft);color:var(--mark);border-radius:6px;padding:8px 12px;font-weight:700}
@@ -187,6 +191,7 @@ button.srow:hover{background:var(--mark-soft)}
   <main id="view"></main>
   <p class="note" id="saveNote">紀錄儲存中…</p>
 </div>
+<script src="exam.js"></script>
 <script>
 /* ===== 設定：部署 Apps Script 後，把網址貼在這裡 ===== */
 const API_URL="https://script.google.com/macros/s/AKfycbzWeFgQpbEbA7GRWD1IGNptH5-xD7S_hVLdNrwTS1YAcwrQYBoB0fbJnDts4_JXiEfnbg/exec";           // 例：https://script.google.com/macros/s/xxxx/exec
@@ -612,8 +617,11 @@ const BANK_SOC=[
 const SUBJ={chi:{n:"國文",c:"var(--s-chi)"},eng:{n:"英文",c:"var(--s-eng)"},math:{n:"數學",c:"var(--s-math)"},sci:{n:"自然",c:"var(--s-sci)"},soc:{n:"社會",c:"var(--s-soc)"}};
 const ORDER=["eng","math","sci","chi","soc"];
 const RAW={chi:BANK_CHI,eng:BANK_ENG,math:BANK_MATH,sci:BANK_SCI,soc:BANK_SOC};
+/* 會考歷屆試題在 exam.js；短文以編號存在 EXAM_PS */
+if(typeof BANK_EXAM!=="undefined")for(const s in BANK_EXAM)RAW[s]=RAW[s].concat(BANK_EXAM[s]);
+const psOf=v=>typeof v==="number"?EXAM_PS[v]:v;
 const BANK=[];
-for(const s in RAW)for(const r of RAW[s])BANK.push({id:r[0],s,u:r[1],lv:r[2],t:r[3],o:r[4],a:r[5],e:r[6],ps:r[7]&&r[7].ps,au:r[7]&&r[7].au});
+for(const s in RAW)for(const r of RAW[s])BANK.push({id:r[0],s,u:r[1],lv:r[2],t:r[3],o:r[4],a:r[5],e:r[6],ps:r[7]&&psOf(r[7].ps),au:r[7]&&r[7].au,img:r[7]&&r[7].img,ns:r[7]&&r[7].ns,x:r[7]&&r[7].x});
 const BYID=Object.fromEntries(BANK.map(q=>[q.id,q]));
 const UNITS={};for(const q of BANK){(UNITS[q.s]=UNITS[q.s]||[]);if(!UNITS[q.s].includes(q.u))UNITS[q.s].push(q.u)}
 const PER=3, BOXDAYS=[1,3,7], L2_N=15, L2_ACC=0.8;
@@ -646,7 +654,8 @@ function unlocked(s){
 }
 
 let session=null, mode="all";
-function mk(q,again){return {q,again,ord:shuffle([0,1,2,3])}}
+/* 選項是看圖作答（A）～（D）的題目不打亂；聽力只有三個選項 */
+function mk(q,again){const k=[...q.o.keys()];return {q,again,ord:q.ns?k:shuffle(k)}}
 function buildSession(){
   const t=today(); let qs=[];
   if(mode==="wrong"){
@@ -656,13 +665,15 @@ function buildSession(){
     const last={};for(const x of state.hist)last[x.id]=x.d;
     for(const s of subs){
       const up=unlocked(s);
-      const pool=BANK.filter(q=>q.s===s&&(q.lv===1||up));
+      /* 會考歷屆題不必等開啟會考型，一開始就會出現 */
+      const pool=BANK.filter(q=>q.s===s&&(q.lv===1||up||q.x));
       const due=shuffle(pool.filter(q=>state.cards[q.id]&&state.cards[q.id].due<=t));
       const f1=shuffle(pool.filter(q=>q.lv===1&&!state.seen[q.id]&&!state.cards[q.id]));
       const f2=shuffle(pool.filter(q=>q.lv===2&&!state.seen[q.id]&&!state.cards[q.id]));
       /* 做過的題目：最久沒做的優先，昨天剛做過的排最後 */
       const rest=shuffle(pool.filter(q=>state.seen[q.id]&&!state.cards[q.id])).sort((a,b)=>(last[a.id]||"").localeCompare(last[b.id]||""));
-      const fresh=up?[...f2.slice(0,Math.max(1,Math.round(per/3))),...f1,...f2.slice(Math.max(1,Math.round(per/3)))]:f1;
+      const n2=Math.max(1,Math.round(per/3));
+      const fresh=[...f2.slice(0,n2),...f1,...f2.slice(n2)];
       /* 錯題每科最多佔 1/3（五科混合每科 1 題），其餘留在「錯題複習」 */
       const cap=Math.max(1,Math.floor(per/3));
       const pick=[...due.slice(0,cap),...fresh,...rest,...due.slice(cap)].slice(0,per);
@@ -703,13 +714,18 @@ function voiceFor(id){const n=parseInt(String(id).replace(/\D/g,""),10)||0;const
 function speak(text,rate,id){
   if(!canSpeak)return;
   try{speechSynthesis.cancel();if(!VOICES.f&&!VOICES.m)pickVoices();
-    const k=voiceFor(id);
-    /* 慢速：語速放慢，並把句子切成 2～3 個字一組，每組之間自然停頓（部分高品質語音不太理會語速設定） */
-    const words=text.split(/\s+/), parts=[];
-    if(rate<0.8){for(let w=0;w<words.length;w+=words.length<=4?2:3)parts.push(words.slice(w,w+(words.length<=4?2:3)).join(" "))}else parts.push(text);
-    for(const t of parts){const u=new SpeechSynthesisUtterance(t);u.lang="en-US";u.rate=rate;
-      if(k&&VOICES[k]){u.voice=VOICES[k];u.lang=VOICES[k].lang}
-      speechSynthesis.speak(u)}
+    const k0=voiceFor(id);
+    /* 會考聽力稿一行一句，M:／W: 分別用男聲、女聲念，Question: 用旁白的聲音 */
+    for(const line of text.split("\n")){
+      const m=line.match(/^(M|W|Question):\s*(.*)$/), seg=m?m[2]:line;
+      const k=m&&m[1]!=="Question"&&VOICES[m[1]==="M"?"m":"f"]?(m[1]==="M"?"m":"f"):k0;
+      /* 慢速：語速放慢，並把句子切成 2～3 個字一組，每組之間自然停頓（部分高品質語音不太理會語速設定） */
+      const words=seg.split(/\s+/), parts=[];
+      if(rate<0.8){for(let w=0;w<words.length;w+=words.length<=4?2:3)parts.push(words.slice(w,w+(words.length<=4?2:3)).join(" "))}else parts.push(seg);
+      for(const t of parts){const u=new SpeechSynthesisUtterance(t);u.lang="en-US";u.rate=rate;
+        if(k&&VOICES[k]){u.voice=VOICES[k];u.lang=VOICES[k].lang}
+        speechSynthesis.speak(u)}
+    }
   }catch(e){}
 }
 
@@ -727,10 +743,11 @@ function renderPlay(){
   const verdict=p===q.a?"答對了！":p===-1?`沒關係，正確答案是 ${right}`:`正確答案是 ${right}`;
   const node=el(`<section class="sheet">
     <div class="strip" style="grid-template-columns:repeat(${qs.length},1fr)">${strip}</div>
-    <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.lv===2?'<span class="lv2">會考型</span>':''}${again?'<span class="again">↻ 錯題再練</span>':''}</span><span class="num">第 ${i+1} / ${qs.length} 題</span></div>
+    <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.x?`<span class="lv2">${q.x} 會考</span>`:q.lv===2?'<span class="lv2">會考型</span>':''}${again?'<span class="again">↻ 錯題再練</span>':''}</span><span class="num">第 ${i+1} / ${qs.length} 題</span></div>
     ${session.fastRun>=3&&!done?'<div class="slow">慢慢來，把題目看完再選，答對比答快重要。</div>':''}
     ${q.ps?`<div class="passage">${esc(q.ps)}</div>`:''}
-    ${q.au?`<div class="listen">${canSpeak?`<button class="next" id="play">▶ 播放</button><button class="tab" id="slow">慢速播放</button><span class="note">${voiceFor(q.id)==="m"?"男聲":"女聲"}</span>`:`<span class="note">這台裝置不能播放聲音，請看句子作答：</span><b lang="en">${esc(q.au)}</b>`}${done&&canSpeak?`<span class="say" lang="en">${esc(q.au)}</span>`:''}</div>`:''}
+    ${q.au?`<div class="listen">${canSpeak?`<button class="next" id="play">▶ 播放</button><button class="tab" id="slow">慢速播放</button><span class="note">${/^(M|W):/m.test(q.au)?"男女對話":voiceFor(q.id)==="m"?"男聲":"女聲"}</span>`:`<span class="note">這台裝置不能播放聲音，請看句子作答：</span><b lang="en">${esc(q.au)}</b>`}${done&&canSpeak?`<span class="say" lang="en">${esc(q.au)}</span>`:''}</div>`:''}
+    ${q.img?[].concat(q.img).map(src=>`<a href="${esc(src)}" target="_blank" rel="noopener" title="點一下看大圖"><img class="qimg" src="${esc(src)}" alt="題目附圖" loading="lazy"></a>`).join(""):''}
     <p class="q">${esc(q.t)}</p>
     <div class="opts">${opts}</div>
     ${done?'':'<button class="dunno" id="dunno">我不會，直接看解析</button>'}
@@ -848,7 +865,7 @@ function histHTML(){
     const mine=x.p===-1?'我不會':`${esc(q.o[x.p])}`;
     return `<article class="hq ${x.ok?'ok':'bad'}">
       <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span><b class="${x.ok?'tok':'tbad'}">${x.ok?'✓ 答對':x.p===-1?'？ 不會':'✗ 答錯'}</b></span><span class="num">${md(x.d)} ${x.h||''}${x.sec!=null?` · ${x.sec} 秒`:''}${x.sec!=null&&x.p!==-1&&x.sec<(q.ps?6:3)?' ⚡':''}</span></div>
-      ${q.ps?`<div class="passage small">${esc(q.ps)}</div>`:''}${q.au?`<div class="say" lang="en">🔊 ${esc(q.au)}</div>`:''}
+      ${q.ps?`<div class="passage small">${esc(q.ps)}</div>`:''}${q.img?[].concat(q.img).map(src=>`<a href="${esc(src)}" target="_blank" rel="noopener" title="點一下看大圖"><img class="qimg" src="${esc(src)}" alt="題目附圖" loading="lazy"></a>`).join(""):''}${q.au?`<div class="say" lang="en">🔊 ${esc(q.au)}</div>`:''}
       <p class="hqq">${esc(q.t)}</p>
       <div class="hans"><span>他選：<b>${mine}</b></span>${x.ok?'':`<span>正確：<b class="tok">${esc(q.o[q.a])}</b></span>`}</div>
       <div class="hexp">${esc(q.e)}</div></article>`}).join("");
@@ -924,7 +941,7 @@ function renderRep(){
     return `<tr><th scope="row">${esc(u.u)}</th><td class="num">${u.n}</td><td><div class="rbar"><i style="width:${u.r||0}%;background:${u.r!=null&&u.r<60?'var(--bad)':S.c}"></i></div><span class="num">${u.r==null?'—':u.r+'%'}</span></td><td class="num">${u.dk||''}</td><td class="num">${u.avg==null?'—':u.avg.toFixed(1)}</td><td>${v?`<span class="vd ${v[1]}">${v[0]}</span>`:'—'}</td></tr>`}).join("");
   const wmax=100;
   const wbars=D.weeks.length?D.weeks.map(w=>`<div class="wk"><span class="num">${w.r}%</span><i style="height:${Math.max(4,w.r/wmax*100)}%"></i><span class="wl">${md(w.k)}</span><span class="wn">${w.n} 題</span></div>`).join(""):'<p class="note">還沒有資料。</p>';
-  const tops=D.top.map(x=>`<tr><td>${x.q.ps?'<span class="unit">附文章</span> ':''}${x.q.au?`<span class="unit">聽力</span> <i lang="en">${esc(x.q.au)}</i><br>`:''}${esc(x.q.t)}</td><td>${esc(x.q.u)}</td><td class="num">${x.n}/${x.t}</td><td class="tbad">${esc(x.pick)}</td><td class="tok">${esc(x.q.o[x.q.a])}</td></tr>`).join("");
+  const tops=D.top.map(x=>`<tr><td>${x.q.ps?'<span class="unit">附文章</span> ':''}${x.q.au?`<span class="unit">聽力</span> <i lang="en">${esc(x.q.au.length>90?x.q.au.slice(0,90)+"…":x.q.au)}</i><br>`:''}${esc(x.q.t)}</td><td>${esc(x.q.u)}</td><td class="num">${x.n}/${x.t}</td><td class="tbad">${esc(x.pick)}</td><td class="tok">${esc(x.q.o[x.q.a])}</td></tr>`).join("");
   const node=el(`<section class="sheet report">
     <div class="rep-head">
       <div><h2>${S.n}學習報告</h2><p class="note">${repRange?`${md(D.since)} 至 ${md(today())}`:'全部紀錄'}・產生於 ${md(today())}</p></div>
