@@ -1044,7 +1044,7 @@ function renderRep(){
 }
 
 /* ===== 雲端同步（Google Apps Script） ===== */
-let syncTimer=null, syncing=false;
+let syncTimer=null, syncing=false, syncAgain=false, lastPull=0;
 function rowsToSend(){
   return state.hist.filter(x=>x.q>(state.sentSeq||0)).map(x=>{const q=BYID[x.id];
     return {q:x.q,d:x.d,h:x.h,s:SUBJ[q.s].n,u:q.u,lv:q.lv===2?"會考型":"基礎",id:x.id,t:(q.au?"[聽力] "+q.au+" ／ ":"")+q.t,
@@ -1052,7 +1052,10 @@ function rowsToSend(){
 }
 function scheduleSync(){if(!API_URL)return;clearTimeout(syncTimer);syncTimer=setTimeout(syncNow,1500)}
 async function syncNow(){
-  if(!API_URL||syncing)return;syncing=true;
+  if(!API_URL)return;
+  /* 上一次同步還沒回來時，記下來等它結束再補傳，不然最後幾題會漏傳 */
+  if(syncing){syncAgain=true;return}
+  syncing=true;syncAgain=false;clearTimeout(syncTimer);
   try{
     const res=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({type:"sync",key:API_KEY,state,rows:rowsToSend()})});
     const j=await res.json();
@@ -1061,9 +1064,11 @@ async function syncNow(){
     else note.textContent="同步失敗："+(j.error||"未知原因")+"，紀錄先存在這台裝置。";
   }catch(e){note.textContent="現在沒有網路，紀錄先存在這台裝置，下次會自動補傳。"}
   syncing=false;
+  if(syncAgain)syncNow();
 }
 async function pullRemote(){
   if(!API_URL){note.textContent="紀錄存在這台裝置上（還沒設定雲端同步）。";return}
+  lastPull=Date.now();
   try{
     const res=await fetch(API_URL+"?key="+encodeURIComponent(API_KEY));const j=await res.json();
     if(j.state){const d=normalize(j.state);
@@ -1082,7 +1087,12 @@ async function pullRemote(){
     if(cur==="prog")renderProg();else if(cur==="rep")renderRep();else if(!session||(session.i===0&&session.picked===null)){session=null;renderPlay()}
   }catch(e){note.textContent="現在連不到雲端，紀錄先存在這台裝置。"}
 }
-window.addEventListener("online",syncNow);
+window.addEventListener("online",pullRemote);
+/* 分頁放著沒關、隔天再打開時，先抓雲端最新紀錄合併，避免舊資料蓋掉今天做的題；切走時立刻補傳 */
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="hidden"){if(state.hist.some(x=>x.q>(state.sentSeq||0)))syncNow()}
+  else if(Date.now()-lastPull>5*60*1000)pullRemote();
+});
 
 setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
 pullRemote();
