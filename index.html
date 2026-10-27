@@ -122,6 +122,8 @@ button.srow:hover{background:var(--mark-soft)}
 a+a>.qimg{margin-top:8px}
 .dunno{align-self:flex-start;font:inherit;font-size:1rem;color:var(--muted);background:transparent;border:1.5px dashed var(--muted);border-radius:6px;padding:8px 16px;cursor:pointer}
 .dunno:hover{color:var(--ink);border-color:var(--ink)}
+.back{align-self:flex-start;font:inherit;font-size:.95rem;font-weight:700;color:var(--muted);background:transparent;border:0;padding:4px 2px;cursor:pointer}
+.back:hover{color:var(--ink)}
 .slow{background:var(--mark-soft);color:var(--mark);border-radius:6px;padding:8px 12px;font-weight:700}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
 .fastb{font-style:normal;color:var(--bad);font-size:.85rem;font-weight:700;white-space:nowrap}
@@ -758,6 +760,14 @@ function picker(){
   return node;
 }
 
+/* 點錯科目時回到選科：已作答的題目每題都已存好並會同步，沒做的不算 */
+function renderPick(){
+  if(canSpeak)try{speechSynthesis.cancel()}catch(e){}
+  session=null;
+  view.replaceChildren(picker(),el(`<section class="sheet center"><h2>要練哪一科？</h2><p>點上面的按鈕開始。剛才做過的題目已經記錄下來了。</p></section>`));
+  window.scrollTo({top:0});
+}
+
 const view=document.getElementById("view");
 function el(h){const d=document.createElement("div");d.innerHTML=h.trim();return d.firstElementChild}
 
@@ -814,7 +824,9 @@ function renderPlay(){
     return `<button class="${c}" data-oi="${oi}" ${done?"disabled":""}><span class="bub">${ABCD[pos]}</span><span>${esc(q.o[oi])}</span></button>`}).join("");
   const right=ABCD[ord.indexOf(q.a)];
   const verdict=p===q.a?"答對了！":p===-1?`沒關係，正確答案是 ${right}`:`正確答案是 ${right}`;
+  const showPick=i===0&&!done;
   const node=el(`<section class="sheet">
+    ${showPick?'':'<button class="back" id="back">← 換科目</button>'}
     <div class="strip" style="grid-template-columns:repeat(${qs.length},1fr)">${strip}</div>
     <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.x?`<span class="lv2">${q.x} 會考</span>`:q.lv===2?'<span class="lv2">會考型</span>':''}${again?'<span class="again">↻ 錯題再練</span>':''}</span><span class="num">第 ${i+1} / ${qs.length} 題</span></div>
     ${session.fastRun>=3&&!done?'<div class="slow">慢慢來，把題目看完再選，答對比答快重要。</div>':''}
@@ -831,7 +843,8 @@ function renderPlay(){
   node.querySelector("#play")?.addEventListener("click",()=>speak(q.au,0.9,q.id));
   node.querySelector("#slow")?.addEventListener("click",()=>speak(q.au,0.5,q.id));
   node.querySelector("#next")?.addEventListener("click",()=>{session.i++;session.picked=null;renderPlay();window.scrollTo({top:0})});
-  if(i===0&&!done)view.replaceChildren(picker(),node);else view.replaceChildren(node);
+  node.querySelector("#back")?.addEventListener("click",renderPick);
+  if(showPick)view.replaceChildren(picker(),node);else view.replaceChildren(node);
 }
 
 function answer(k){
@@ -864,8 +877,10 @@ function renderDone(){
     ${session.fastN>=3?`<p class="slow">這一輪有 ${session.fastN} 題作答很快，下次可以把題目看完再選。</p>`:''}
     <div class="btn-row">
       <button class="next" id="more">再做一輪</button>
+      <button class="tab" id="pickSub">換科目</button>
       <button class="tab" id="seeProg">看練習紀錄</button>
     </div></section>`);
+  node.querySelector("#pickSub").onclick=renderPick;
   node.querySelector("#more").onclick=()=>{buildSession();renderPlay()};
   node.querySelector("#seeProg").onclick=()=>setTab("prog");
   const t=today(), L=state.log[t]; if(L&&!session.counted){session.counted=true;L.r=(L.r||0)+1; save();}
