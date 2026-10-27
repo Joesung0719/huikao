@@ -179,7 +179,7 @@ a+a>.qimg{margin-top:8px}
   <header class="noprint">
     <div>
       <h1>會考刷題本</h1>
-      <div class="sub">五科混合每科 3 題，或單科 10 題・錯題會自動再回來</div>
+      <div class="sub" id="subline">五科混合每科 3 題，或單科 10 題・錯題會自動再回來</div>
     </div>
     <div class="tabs" role="tablist">
       <button class="tab" id="tab-play" role="tab" aria-selected="true">今日練習</button>
@@ -684,7 +684,11 @@ const BANK=[];
 for(const s in RAW)for(const r of RAW[s])BANK.push({id:r[0],s,u:r[1],lv:r[2],t:r[3],o:r[4],a:r[5],e:r[6],ps:r[7]&&psOf(r[7].ps),au:r[7]&&r[7].au,img:r[7]&&r[7].img,ns:r[7]&&r[7].ns,x:r[7]&&r[7].x});
 const BYID=Object.fromEntries(BANK.map(q=>[q.id,q]));
 const UNITS={};for(const q of BANK){(UNITS[q.s]=UNITS[q.s]||[]);if(!UNITS[q.s].includes(q.u))UNITS[q.s].push(q.u)}
-const PER=3, BOXDAYS=[1,3,7], L2_N=15, L2_ACC=0.8;
+const BOXDAYS=[1,3,7], L2_N=15, L2_ACC=0.8;
+/* 越接近會考，每天題量越多：12 月底前每科 3 題，1–2 月 4 題，3 月 5 題，4 月起 6 題（上限每天 30 題） */
+function perDay(d){return d<"2027-01-01"?3:d<"2027-03-01"?4:d<"2027-04-01"?5:6}
+function goalOf(d){return perDay(d)*5}
+function isDone(d){const L=state.log[d];return !!L&&L.n>=goalOf(d)}
 
 function today(d=new Date()){const z=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate())}
 function addDays(s,n){const d=new Date(s+"T12:00:00");d.setDate(d.getDate()+n);return today(d)}
@@ -721,7 +725,7 @@ function buildSession(){
   if(mode==="wrong"){
     qs=shuffle(Object.keys(state.cards).filter(id=>BYID[id])).slice(0,15).map(id=>mk(BYID[id],true));
   }else{
-    const subs=mode==="all"?ORDER:[mode], per=mode==="all"?PER:10;
+    const subs=mode==="all"?ORDER:[mode], per=mode==="all"?perDay(t):10;
     const last={};for(const x of state.hist)last[x.id]=x.d;
     for(const s of subs){
       const up=unlocked(s);
@@ -735,8 +739,11 @@ function buildSession(){
       const n2=Math.max(1,Math.round(per/3));
       const fresh=[...f2.slice(0,n2),...f1,...f2.slice(n2)];
       /* 錯題每科最多佔 1/3（五科混合每科 1 題），其餘留在「錯題複習」 */
-      const cap=Math.max(1,Math.floor(per/3));
-      const pick=[...due.slice(0,cap),...fresh,...rest,...due.slice(cap)].slice(0,per);
+      const cap=Math.max(1,Math.floor(per/3)), dueP=due.slice(0,cap);
+      /* 有會考歷屆題的科目，每輪至少一半是真題：沒做過的先出，都做過就出最久沒做的 */
+      const nx=Math.max(0,Math.ceil(per/2)-dueP.filter(q=>q.x).length);
+      const xs=[...fresh.filter(q=>q.x),...rest.filter(q=>q.x)].slice(0,nx);
+      const pick=[...new Set([...dueP,...xs,...fresh,...rest,...due.slice(cap)])].slice(0,per);
       qs.push(...pick.map(q=>mk(q,!!state.cards[q.id])));
     }
   }
@@ -789,7 +796,13 @@ function speak(text,rate,id){
   }catch(e){}
 }
 
+/* 標題下顯示今天的目標和進度 */
+function paintGoal(){
+  const t=today(), g=goalOf(t), n=state.log[t]?.n||0, box=document.getElementById("subline");
+  if(box)box.textContent=`今日目標 ${g} 題（五科混合每科 ${perDay(t)} 題），已做 ${n} 題${n>=g?"・完成 ✓":""}・越接近會考題量越多`;
+}
 function renderPlay(){
+  paintGoal();
   if(!session)buildSession();
   const {qs,i,res}=session;
   if(!qs.length){view.replaceChildren(picker(),el(`<section class="sheet center"><h2>目前沒有待複習的錯題</h2><p>做錯或按「我不會」的題目會自動收進這裡。</p></section>`));return}
@@ -846,6 +859,7 @@ function renderDone(){
   const node=el(`<section class="sheet center">
     <div class="big">${c} / ${n}</div>
     <h2>${c===n?'全對！今天超強':c>=n*0.7?'做得很好，繼續保持':'完成了！每天做就會進步'}</h2>
+    ${(()=>{const t=today(),g=goalOf(t),d=state.log[t]?.n||0;return d>=g?`<p>今天的目標 ${g} 題已完成，想多做可以再一輪。</p>`:`<p><b>今天還差 ${g-d} 題</b>達成目標（${g} 題）。</p>`})()}
     <p>${mode==="wrong"?`還有 ${Object.keys(state.cards).length} 題待複習錯題。連續答對幾次就會移出錯題本。`:wrong?`答錯或不會的 ${wrong} 題，之後會再出現，也可以按「錯題複習」先練，記得看解析。`:'這一輪沒有錯題，明天會出新題目。'}</p>
     ${session.fastN>=3?`<p class="slow">這一輪有 ${session.fastN} 題作答很快，下次可以把題目看完再選。</p>`:''}
     <div class="btn-row">
@@ -895,7 +909,7 @@ function renderProg(){
     <div><div class="days">${bars}</div><div class="dlab">${labs}</div></div>
     <h2>每日紀錄</h2>
     <div class="log">${days.slice().reverse().map(d=>{const L=state.log[d],wk="日一二三四五六"[new Date(d+"T12:00:00").getDay()];
-      const st=!L?["none","沒練習"]:(L.r||L.n>=15)?["done","完成"]:["part","做一部分"];
+      const st=!L?["none","沒練習"]:isDone(d)?["done","完成"]:["part","做一部分"];
       return `<button class="lrow ${L?'':'off'}" data-d="${d}" ${L?'':'disabled'} aria-pressed="${histDay===d}"><span class="ld">${md(d)}（${wk}）</span><span class="pill ${st[0]}">${st[1]}</span><span class="num">${L?L.n+" 題・對 "+Math.round(L.c/L.n*100)+"%":"—"}${L&&L.fast?` <em class="fastb">⚡快答 ${L.fast}</em>`:''}</span><span class="num lt">${L?L.first+(L.last!==L.first?"–"+L.last:""):""}</span></button>`}).join("")}</div>
     <p class="note">點某一天，可以看那天做過的題目和解析。「⚡快答」是不到 3 秒就作答的題數，可能沒看完題目。</p>
     <h2>各科答對率（點科目看單元）</h2>
