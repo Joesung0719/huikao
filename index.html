@@ -153,6 +153,13 @@ a+a>.qimg{margin-top:8px}
 .vd{font-size:.82rem;font-weight:700;padding:1px 9px;border-radius:999px;white-space:nowrap}
 .vd.good{background:var(--ok-soft);color:var(--ok)}.vd.mid{background:var(--mark-soft);color:var(--mark)}.vd.weak{background:var(--bad-soft);color:var(--bad)}.vd.none{color:var(--muted)}
 .rtable.top td:first-child{min-width:14em}
+.btable{width:100%;border-collapse:collapse;font-size:.95rem;font-variant-numeric:tabular-nums}
+.btable th,.btable td{padding:6px 4px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
+.btable th:first-child{text-align:left}
+.btable thead th{font-size:.85rem;font-weight:700}
+.btable td.no{color:var(--muted)}
+.btable tr.sum td,.btable tr.sum th{font-weight:700}
+.btable small{color:var(--muted);font-weight:400}
 .lvrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .lvrow div{border:1.5px solid var(--line);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column}
 .lvrow span{font-size:.9rem;color:var(--muted)}.lvrow b{font-size:1.6rem}.lvrow small{color:var(--muted)}
@@ -918,6 +925,9 @@ function renderProg(){
     <div class="hhead"><h2 id="hist">${histDay?`${md(histDay)} 的作答紀錄`:'最近 50 題作答紀錄'}</h2>
       <div class="pick-row" style="margin:0"><button class="chip" id="hAll" style="--c:var(--mark)" aria-pressed="${!histDay}">最近 50 題</button><button class="chip" id="hToday" style="--c:var(--mark)" aria-pressed="${histDay===t}">今天</button><button class="chip" id="hWrong" style="--c:var(--bad)" aria-pressed="${histWrong}">只看答錯</button></div></div>
     <div class="hist">${histHTML()}</div>
+    <h2>題庫清單</h2>
+    ${bankTable()}
+    <p class="note">「會考」是歷屆真題（英文下方小字是其中的聽力題數），「—」表示還沒收錄；「自編類題」是依康軒單元自己出的題。新上傳的考題加進來後，這裡會自動多一行。</p>
     <p class="note">${totN?`總答對率 ${Math.round(totC/totN*100)}%。`:'還沒有紀錄，做完第一輪就會出現。'}答錯的題目會在隔天、3 天後、7 天後再出現。題庫共 ${BANK.length} 題（基礎 ${BANK.filter(q=>q.lv===1).length}、會考型 ${BANK.filter(q=>q.lv===2).length}）。</p>
   </section>`);
   node.querySelector("#reviewAll")?.addEventListener("click",()=>{mode="wrong";buildSession();setTab("play")});
@@ -928,6 +938,16 @@ function renderProg(){
   node.querySelector("#hToday").onclick=()=>{histDay=t;renderProg()};
   node.querySelector("#hWrong").onclick=()=>{histWrong=!histWrong;renderProg()};
   view.replaceChildren(node);
+}
+/* 題庫清單：會考真題依年度×科目統計題數，自編題另列一行 */
+function bankTable(){
+  const ys=[...new Set(BANK.filter(q=>q.x).map(q=>+q.x))];
+  const lo=Math.min(113,...ys),hi=Math.max(115,...ys),rows=[];
+  const cell=qs=>{if(!qs.length)return '<td class="no">—</td>';const L=qs.filter(q=>q.au).length;return `<td>${qs.length}${L?`<br><small>聽 ${L}</small>`:''}</td>`};
+  for(let y=hi;y>=lo;y--)rows.push(`<tr><th scope="row">${y} 會考</th>${ORDER.map(s=>cell(BANK.filter(q=>q.s===s&&+q.x===y))).join("")}</tr>`);
+  rows.push(`<tr><th scope="row">自編類題</th>${ORDER.map(s=>cell(BANK.filter(q=>q.s===s&&!q.x))).join("")}</tr>`);
+  rows.push(`<tr class="sum"><th scope="row">合計</th>${ORDER.map(s=>`<td>${BANK.filter(q=>q.s===s).length}</td>`).join("")}</tr>`);
+  return `<div class="tscroll"><table class="btable"><thead><tr><th>來源</th>${ORDER.map(s=>`<th style="color:${SUBJ[s].c}">${SUBJ[s].n}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 function histHTML(){
   let h=state.hist.slice();
