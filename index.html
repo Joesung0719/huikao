@@ -1168,8 +1168,11 @@ async function pullRemote(){
       const merged={log:Object.assign({},d.log),cards:Object.assign({},d.cards,state.cards),seen:Object.assign({},d.seen,state.seen),
         hist,up:Object.assign({},d.up,state.up),resetAt:d.resetAt||state.resetAt,
         seq:Math.max(d.seq||0,state.seq||0),sentSeq:Math.max(d.sentSeq||0,state.sentSeq||0)};
+      /* 兌換紀錄也要合併，漏了它畫面會出錯、被誤判成連不到雲端 */
+      const byRw=new Map();for(const r of [...d.rw,...(state.rw||[])])byRw.set(r.d+"|"+r.k+"|"+r.at,r);
+      merged.rw=[...byRw.values()].sort((a,b)=>(a.at||0)-(b.at||0));
       for(const k in state.log){if(!merged.log[k]||merged.log[k].n<state.log[k].n)merged.log[k]=state.log[k]}
-      state=merged;
+      state=normalize(merged);
     }
     try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){}
     await syncNow();
