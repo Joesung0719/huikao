@@ -99,6 +99,19 @@ button.lrow.off{cursor:default}
 .tok{color:var(--ok)}.tbad{color:var(--bad)}
 @media (max-width:480px){.lrow{grid-template-columns:6.4em 5.6em 1fr;font-size:.92rem}.lt{display:none}}
 .note{font-size:.9rem;color:var(--muted)}
+.reward{border:1.5px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.reward .bar{height:14px}
+.rwbody{display:flex;gap:14px;align-items:center}
+.rwbody>div{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+/* 卡包示意：灰色卡包從下往上依點數變成彩色，集滿會發光 */
+.pack{position:relative;width:76px;flex:none;aspect-ratio:301/618}
+.pack img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.pack .gray{filter:grayscale(1) brightness(.55);opacity:.7}
+.pack .full{animation:glow 1.6s ease-in-out infinite alternate}
+@keyframes glow{from{filter:drop-shadow(0 0 2px gold)}to{filter:drop-shadow(0 0 10px gold)}}
+.pack b{position:absolute;left:0;right:0;bottom:-2px;text-align:center;font-size:.8rem;color:#fff;text-shadow:0 0 3px #000}
+.reward .ready{color:var(--ok);font-weight:700}
+.rwtop{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
 @media (max-width:480px){.stats{grid-template-columns:1fr 1fr 1fr}.stat b{font-size:1.4rem}.q{font-size:1.18rem}.opt{font-size:1.05rem}}
 @media (prefers-reduced-motion:no-preference){.opt{transition:border-color .15s,background .15s}}
 
@@ -706,11 +719,29 @@ function esc(x){return String(x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;","
 function md(d){return (+d.slice(5,7))+"/"+(+d.slice(8))}
 const ABCD="ABCD";
 
-const EMPTY=()=>({log:{},cards:{},seen:{},hist:[],up:{},seq:0,sentSeq:0});
+const EMPTY=()=>({log:{},cards:{},seen:{},hist:[],up:{},seq:0,sentSeq:0,rw:[]});
+
+/* 答對獎勵：累積 100 點換寶可夢卡包 1 包或零用錢 20 元。
+   答對 1 題 1 點、會考真題 2 點；不到 3 秒的快答不算，同一題同一天重複答對只算一次。點數記在每天的 log.pt */
+const RW_N=100;
+function rwPoints(){return Object.values(state.log).reduce((a,L)=>a+(L.pt||0),0)}
+function rwInfo(){const pts=rwPoints(),used=state.rw.length*RW_N,left=pts-used;return {pts,ready:Math.floor(left/RW_N),cur:left%RW_N}}
+function rwBox(withBtns){
+  const {ready,cur}=rwInfo();
+  const pct=ready?100:cur;
+  return `<div class="reward"><div class="rwbody">
+    <div class="pack" aria-hidden="true"><img class="gray" src="img/reward-pack.webp" alt=""><img class="${ready?'full':''}" src="img/reward-pack.webp" alt="" style="clip-path:inset(${100-pct}% 0 0 0)">${ready>1?`<b>×${ready}</b>`:''}</div>
+    <div><div class="rwtop"><b>🎁 答對獎勵</b><span class="num">${cur} / ${RW_N} 點</span></div>
+    <div class="bar"><i style="width:${cur}%;background:var(--ok)"></i></div>
+    ${ready?`<span class="ready">可以兌換 ${ready} 次！（寶可夢卡包 1 包或零用錢 20 元）</span>`:`<span class="note">再 ${RW_N-cur} 點換寶可夢卡包 1 包或零用錢 20 元</span>`}
+  </div></div>
+    ${withBtns&&ready?`<div class="btn-row"><span class="note">家長兌換後按：</span><button class="tab" data-rw="card">已給卡包</button><button class="tab" data-rw="cash">已給 20 元</button></div>`:''}
+  </div>`;
+}
 let state=EMPTY();
 let store=null; const LS="huikao-progress-v1";
 const note=document.getElementById("saveNote");
-function normalize(s){return Object.assign(EMPTY(),s||{})}
+function normalize(s){s=Object.assign(EMPTY(),s||{});if(!Array.isArray(s.rw))s.rw=[];return s}
 function loadLocal(){try{const s=localStorage.getItem(LS);if(s)state=normalize(JSON.parse(s))}catch(e){}}
 function save(){
   try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){}
@@ -816,7 +847,7 @@ function speak(text,rate,id){
 /* 標題下顯示今天的目標和進度 */
 function paintGoal(){
   const t=today(), g=goalOf(t), n=state.log[t]?.n||0, box=document.getElementById("subline");
-  if(box)box.textContent=`今日目標 ${g} 題（五科混合每科 ${perDay(t)} 題），已做 ${n} 題${n>=g?"・完成 ✓":""}・越接近會考題量越多`;
+  if(box)box.textContent=`今日目標 ${g} 題（五科混合每科 ${perDay(t)} 題），已做 ${n} 題${n>=g?"・完成 ✓":""}・越接近會考題量越多・${(()=>{const r=rwInfo();return r.ready?`🎁 可兌換獎勵 ${r.ready} 次`:`🎁 再 ${RW_N-r.cur} 點換卡包`})()}`;
 }
 function renderPlay(){
   paintGoal();
@@ -864,6 +895,8 @@ function answer(k){
   if(ok){const c=state.cards[id];if(c){c.box++;if(c.box>=BOXDAYS.length)delete state.cards[id];else c.due=addDays(t,BOXDAYS[c.box])}}
   else state.cards[id]={box:0,due:addDays(t,1)};
   const L=state.log[t]||(state.log[t]={n:0,c:0,by:{}});
+  const pt=ok&&!fast&&!state.hist.some(x=>x.d===t&&x.id===id&&x.ok)?(q.x?2:1):0;
+  if(pt)L.pt=(L.pt||0)+pt; session.pt=(session.pt||0)+pt;
   L.n++; if(ok)L.c++; if(k===-1)L.dk=(L.dk||0)+1; if(fast)L.fast=(L.fast||0)+1;
   const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
   if(!L.first)L.first=hm; L.last=hm;
@@ -881,6 +914,8 @@ function renderDone(){
     <h2>${c===n?'全對！今天超強':c>=n*0.7?'做得很好，繼續保持':'完成了！每天做就會進步'}</h2>
     ${(()=>{const t=today(),g=goalOf(t),d=state.log[t]?.n||0;return d>=g?`<p>今天的目標 ${g} 題已完成，想多做可以再一輪。</p>`:`<p><b>今天還差 ${g-d} 題</b>達成目標（${g} 題）。</p>`})()}
     <p>${mode==="wrong"?`還有 ${Object.keys(state.cards).length} 題待複習錯題。連續答對幾次就會移出錯題本。`:wrong?`答錯或不會的 ${wrong} 題，之後會再出現，也可以按「錯題複習」先練，記得看解析。`:'這一輪沒有錯題，明天會出新題目。'}</p>
+    ${session.pt?`<p>這一輪拿到 <b>${session.pt}</b> 點獎勵點數。</p>`:''}
+    ${rwBox(false)}
     ${session.fastN>=3?`<p class="slow">這一輪有 ${session.fastN} 題作答很快，下次可以把題目看完再選。</p>`:''}
     <div class="btn-row">
       <button class="next" id="more">再做一輪</button>
@@ -926,6 +961,9 @@ function renderProg(){
       <div class="stat"><b>${totN}</b><span>累計題數</span></div>
       <div class="stat"><b>${wrongNow}</b><span>待複習錯題</span></div>
     </div>
+    ${rwBox(true)}
+    ${state.rw.length?`<p class="note">兌換紀錄：${state.rw.slice().reverse().map(r=>`${md(r.d)} ${r.k==="cash"?"20 元":"卡包"}`).join("、")}（共 ${state.rw.length} 次）</p>`:''}
+    <p class="note">答對 1 題 1 點，會考真題 2 點；不到 3 秒的快答不算，同一題同一天重複答對只算一次。</p>
     ${wrongNow?`<button class="next" id="reviewAll" style="align-self:stretch">複習全部錯題（${wrongNow} 題）</button>`:''}
     <h2>最近 14 天每日題數</h2>
     <div><div class="days">${bars}</div><div class="dlab">${labs}</div></div>
@@ -945,6 +983,9 @@ function renderProg(){
     <p class="note">「會考」是歷屆真題（英文下方小字是其中的聽力題數），「—」表示還沒收錄；「自編類題」是依康軒單元自己出的題。新上傳的考題加進來後，這裡會自動多一行。</p>
     <p class="note">${totN?`總答對率 ${Math.round(totC/totN*100)}%。`:'還沒有紀錄，做完第一輪就會出現。'}答錯的題目會在隔天、3 天後、7 天後再出現。題庫共 ${BANK.length} 題（基礎 ${BANK.filter(q=>q.lv===1).length}、會考型 ${BANK.filter(q=>q.lv===2).length}）。</p>
   </section>`);
+  node.querySelectorAll("[data-rw]").forEach(b=>b.onclick=()=>{const k=b.dataset.rw;
+    if(!confirm(`確定已經給他${k==="cash"?"零用錢 20 元":"寶可夢卡包 1 包"}了嗎？`))return;
+    state.rw.push({d:t,k,at:Date.now()});save();paintGoal();renderProg()});
   node.querySelector("#reviewAll")?.addEventListener("click",()=>{mode="wrong";buildSession();setTab("play")});
   node.querySelectorAll(".lrow[data-d]").forEach(b=>b.onclick=()=>{histDay=b.dataset.d;renderProg();document.getElementById("hist").scrollIntoView({block:"start"})});
   node.querySelectorAll(".srow").forEach(b=>b.onclick=()=>{openSub=openSub===b.dataset.s?null:b.dataset.s;renderProg()});
