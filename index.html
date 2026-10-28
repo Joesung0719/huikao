@@ -201,7 +201,7 @@ a+a>.qimg{margin-top:8px}
   <header class="noprint">
     <div>
       <h1>會考刷題本</h1>
-      <div class="sub" id="subline">五科混合每科 3 題，或單科 10 題・錯題會自動再回來</div>
+      <div class="sub" id="subline">每天選一科做一輪 15 題・錯題會自動再回來</div>
     </div>
     <div class="tabs" role="tablist">
       <button class="tab" id="tab-play" role="tab" aria-selected="true">今日練習</button>
@@ -707,9 +707,8 @@ for(const s in RAW)for(const r of RAW[s])BANK.push({id:r[0],s,u:r[1],lv:r[2],t:r
 const BYID=Object.fromEntries(BANK.map(q=>[q.id,q]));
 const UNITS={};for(const q of BANK){(UNITS[q.s]=UNITS[q.s]||[]);if(!UNITS[q.s].includes(q.u))UNITS[q.s].push(q.u)}
 const BOXDAYS=[1,3,7], L2_N=15, L2_ACC=0.8;
-/* 越接近會考，每天題量越多：12 月底前每科 3 題，1–2 月 4 題，3 月 5 題，4 月起 6 題（上限每天 30 題） */
-function perDay(d){return d<"2027-01-01"?3:d<"2027-03-01"?4:d<"2027-04-01"?5:6}
-function goalOf(d){return perDay(d)*5}
+/* 越接近會考，每天題量越多：12 月底前 15 題，1–2 月 20 題，3 月 25 題，4 月起 30 題（上限）；單科一輪就是當天的題數 */
+function goalOf(d){return d<"2027-01-01"?15:d<"2027-03-01"?20:d<"2027-04-01"?25:30}
 function isDone(d){const L=state.log[d];return !!L&&L.n>=goalOf(d)}
 
 function today(d=new Date()){const z=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate())}
@@ -757,7 +756,8 @@ function unlocked(s){
   return false;
 }
 
-let session=null, mode="all";
+/* 預設科目：今天還沒做過的第一科 */
+let session=null, mode=ORDER.find(s=>!state.log[today()]?.by?.[s])||ORDER[0];
 /* 選項是看圖作答（A）～（D）的題目不打亂；聽力只有三個選項 */
 function mk(q,again){const k=[...q.o.keys()];return {q,again,ord:q.ns?k:shuffle(k)}}
 function buildSession(){
@@ -765,7 +765,7 @@ function buildSession(){
   if(mode==="wrong"){
     qs=shuffle(Object.keys(state.cards).filter(id=>BYID[id])).slice(0,15).map(id=>mk(BYID[id],true));
   }else{
-    const subs=mode==="all"?ORDER:[mode], per=mode==="all"?perDay(t):10;
+    const subs=[mode], per=goalOf(t);
     const last={};for(const x of state.hist)last[x.id]=x.d;
     for(const s of subs){
       const up=unlocked(s);
@@ -778,7 +778,7 @@ function buildSession(){
       const rest=shuffle(pool.filter(q=>state.seen[q.id]&&!state.cards[q.id])).sort((a,b)=>(last[a.id]||"").localeCompare(last[b.id]||""));
       const n2=Math.max(1,Math.round(per/3));
       const fresh=[...f2.slice(0,n2),...f1,...f2.slice(n2)];
-      /* 錯題每科最多佔 1/3（五科混合每科 1 題），其餘留在「錯題複習」 */
+      /* 錯題每輪最多佔 1/3，其餘留在「錯題複習」 */
       const cap=Math.max(1,Math.floor(per/3)), dueP=due.slice(0,cap);
       /* 有會考歷屆題的科目，每輪至少一半是真題：沒做過的先出，都做過就出最久沒做的 */
       const nx=Math.max(0,Math.ceil(per/2)-dueP.filter(q=>q.x).length);
@@ -792,7 +792,7 @@ function buildSession(){
 
 function picker(){
   const nw=Object.keys(state.cards).length;
-  const opts=[["all","五科混合","var(--mark)"],...ORDER.map(s=>[s,SUBJ[s].n,SUBJ[s].c]),["wrong",`錯題複習（${nw}）`,"var(--bad)"]];
+  const opts=[...ORDER.map(s=>[s,SUBJ[s].n,SUBJ[s].c]),["wrong",`錯題複習（${nw}）`,"var(--bad)"]];
   const node=el(`<div class="pick-row" role="group" aria-label="選擇科別">${opts.map(([k,n,c])=>`<button class="chip" data-m="${k}" aria-pressed="${mode===k}" style="--c:${c}" ${k==="wrong"&&!nw?"disabled":""}>${n}</button>`).join("")}</div>`);
   node.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{mode=b.dataset.m;buildSession();renderPlay()});
   return node;
@@ -847,7 +847,7 @@ function speak(text,rate,id){
 /* 標題下顯示今天的目標和進度 */
 function paintGoal(){
   const t=today(), g=goalOf(t), n=state.log[t]?.n||0, box=document.getElementById("subline");
-  if(box)box.textContent=`今日目標 ${g} 題（五科混合每科 ${perDay(t)} 題），已做 ${n} 題${n>=g?"・完成 ✓":""}・越接近會考題量越多・${(()=>{const r=rwInfo();return r.ready?`🎁 可兌換獎勵 ${r.ready} 次`:`🎁 再 ${RW_N-r.cur} 點換卡包`})()}`;
+  if(box)box.textContent=`今日目標 ${g} 題（選一科做一輪），已做 ${n} 題${n>=g?"・完成 ✓":""}・越接近會考題量越多・${(()=>{const r=rwInfo();return r.ready?`🎁 可兌換獎勵 ${r.ready} 次`:`🎁 再 ${RW_N-r.cur} 點換卡包`})()}`;
 }
 function renderPlay(){
   paintGoal();
