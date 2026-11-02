@@ -36,9 +36,10 @@ body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-siz
 header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;border-bottom:3px double var(--mark);padding-bottom:10px}
 h1{margin:0;font-size:1.65rem;font-weight:900;letter-spacing:.04em;text-wrap:balance}
 .sub{color:var(--muted);font-size:.95rem}
-.tabs{display:flex;gap:6px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
 .tab{font:inherit;font-size:1rem;font-weight:700;padding:8px 16px;border:2px solid var(--mark);background:transparent;color:var(--mark);border-radius:999px;cursor:pointer}
 .tab[aria-selected="true"]{background:var(--mark);color:var(--card)}
+@media (max-width:480px){.tabs{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.tab{padding:6px 4px;font-size:.9rem;white-space:nowrap}}
 button:focus-visible{outline:3px solid var(--mark);outline-offset:2px}
 .sheet{background:var(--card);border:1.5px solid var(--line);border-radius:6px;padding:22px clamp(16px,4vw,28px);display:flex;flex-direction:column;gap:16px}
 .strip{display:grid;grid-template-columns:repeat(15,1fr);gap:4px}
@@ -97,6 +98,11 @@ button.lrow.off{cursor:default}
 .hans{display:flex;flex-wrap:wrap;gap:4px 18px}
 .hexp{font-size:.95rem;color:var(--muted)}
 .tok{color:var(--ok)}.tbad{color:var(--bad)}
+.dots{letter-spacing:.15em;color:var(--ok);font-size:.9rem}.dots i{font-style:normal;color:var(--line)}
+.redo{font-size:.9rem;color:var(--muted)}.explain .redo{display:block;margin-top:6px;font-weight:700;color:var(--ink)}
+.ulist{display:flex;flex-wrap:wrap;gap:6px}
+.ulist span{font-size:.9rem;border:1.5px solid var(--line);border-radius:999px;padding:1px 10px}
+.ulist b{color:var(--bad)}
 @media (max-width:480px){.lrow{grid-template-columns:6.4em 5.6em 1fr;font-size:.92rem}.lt{display:none}}
 .note{font-size:.9rem;color:var(--muted)}
 .reward{border:1.5px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:8px}
@@ -205,6 +211,7 @@ a+a>.qimg{margin-top:8px}
     </div>
     <div class="tabs" role="tablist">
       <button class="tab" id="tab-play" role="tab" aria-selected="true">今日練習</button>
+      <button class="tab" id="tab-book" role="tab" aria-selected="false">錯題本</button>
       <button class="tab" id="tab-prog" role="tab" aria-selected="false">練習紀錄</button>
       <button class="tab" id="tab-rep" role="tab" aria-selected="false">學習報告</button>
     </div>
@@ -706,7 +713,9 @@ const BANK=[];
 for(const s in RAW)for(const r of RAW[s])BANK.push({id:r[0],s,u:r[1],lv:r[2],t:r[3],o:r[4],a:r[5],e:r[6],ps:r[7]&&psOf(r[7].ps),au:r[7]&&r[7].au,img:r[7]&&r[7].img,ns:r[7]&&r[7].ns,x:r[7]&&r[7].x});
 const BYID=Object.fromEntries(BANK.map(q=>[q.id,q]));
 const UNITS={};for(const q of BANK){(UNITS[q.s]=UNITS[q.s]||[]);if(!UNITS[q.s].includes(q.u))UNITS[q.s].push(q.u)}
-const BOXDAYS=[1,3,7], L2_N=15, L2_ACC=0.8;
+/* 錯題間隔重考：答錯後隔 2 天、再 4 天、再 7 天各考一次同類題，連續過關 3 次就從錯題本畢業。
+   每輪最多混 5 題錯題重考，算在當天題數裡，不額外加量 */
+const BOXDAYS=[2,4,7], REDO_N=5, L2_N=15, L2_ACC=0.8;
 /* 越接近會考，每天題量越多：12 月底前 15 題，1–2 月 20 題，3 月 25 題，4 月起 30 題（上限）；單科一輪就是當天的題數 */
 function goalOf(d){return d<"2027-01-01"?15:d<"2027-03-01"?20:d<"2027-04-01"?25:30}
 function isDone(d){const L=state.log[d];return !!L&&L.n>=goalOf(d)}
@@ -759,11 +768,42 @@ function unlocked(s){
 /* 預設科目：今天還沒做過的第一科 */
 let session=null, mode=ORDER.find(s=>!state.log[today()]?.by?.[s])||ORDER[0];
 /* 選項是看圖作答（A）～（D）的題目不打亂；聽力只有三個選項 */
-function mk(q,again){const k=[...q.o.keys()];return {q,again,ord:q.ns?k:shuffle(k)}}
+function mk(q,again,of){const k=[...q.o.keys()];return {q,again,of,ord:q.ns?k:shuffle(k)}}
+
+/* 換題重考：錯題到期時不重出同一題，改從同科同單元挑一題「觀念相近、最近 3 週沒做過」的題。
+   觀念相近用題目＋解析共用的詞來估；同一篇短文、已經在錯題本、這張錯題用過的題都不挑。同單元都做過才退回原題 */
+const TWIN_GAP=21, GRAMS={};
+function grams(q){
+  if(GRAMS[q.id])return GRAMS[q.id];
+  const t=(q.t+" "+q.e).toLowerCase(), g=new Set();
+  for(const w of t.split(/[^\u4e00-\u9fff]+/))for(let i=0;i+1<w.length;i++)g.add(w.slice(i,i+2));
+  for(const w of t.match(/[a-z]{3,}/g)||[])g.add(w);
+  return GRAMS[q.id]=g;
+}
+function twinOf(id,taken){
+  const o=BYID[id], c=state.cards[id]||{}, tw=c.tw||[];
+  const up=unlocked(o.s), since=addDays(today(),-TWIN_GAP);
+  const last={};for(const x of state.hist)last[x.id]=x.d;
+  const cand=BANK.filter(q=>q.s===o.s&&q.u===o.u&&q.id!==id&&!taken.has(q.id)&&!state.cards[q.id]&&!tw.includes(q.id)
+    &&(q.lv===1||up||q.x)&&!!q.au===!!o.au&&!(o.ps&&q.ps===o.ps)&&!((last[q.id]||"")>=since));
+  if(!cand.length)return o;
+  const G=grams(o);
+  const score=q=>{const g=grams(q);let n=0;for(const w of g)if(G.has(w))n++;return n/Math.sqrt(g.size+1)+(state.seen[q.id]?0:0.5)+Math.random()*0.6};
+  return cand.map(q=>[score(q),q]).sort((a,b)=>b[0]-a[0])[0][1];
+}
+/* 把一串題目裡的錯題換成同類題 */
+function withTwins(list){
+  const taken=new Set(list.map(q=>q.id));
+  return list.map(q=>{if(!state.cards[q.id])return mk(q,false);const w=twinOf(q.id,taken);taken.add(w.id);return mk(w,true,q.id)});
+}
+let wrongSub="all";
 function buildSession(){
   const t=today(); let qs=[];
   if(mode==="wrong"){
-    qs=shuffle(Object.keys(state.cards).filter(id=>BYID[id])).slice(0,15).map(id=>mk(BYID[id],true));
+    /* 錯題重考：一次 5 題，最早到期的先考，每題都換成同類的新題 */
+    const ids=shuffle(Object.keys(state.cards).filter(id=>BYID[id]&&(wrongSub==="all"||BYID[id].s===wrongSub)))
+      .sort((a,b)=>state.cards[a].due.localeCompare(state.cards[b].due)).slice(0,REDO_N);
+    qs=withTwins(ids.map(id=>BYID[id]));
   }else{
     const subs=[mode], per=goalOf(t);
     const last={};for(const x of state.hist)last[x.id]=x.d;
@@ -778,13 +818,13 @@ function buildSession(){
       const rest=shuffle(pool.filter(q=>state.seen[q.id]&&!state.cards[q.id])).sort((a,b)=>(last[a.id]||"").localeCompare(last[b.id]||""));
       const n2=Math.max(1,Math.round(per/3));
       const fresh=[...f2.slice(0,n2),...f1,...f2.slice(n2)];
-      /* 錯題每輪最多佔 1/3，其餘留在「錯題複習」 */
-      const cap=Math.max(1,Math.floor(per/3)), dueP=due.slice(0,cap);
+      /* 到期錯題每輪最多 5 題（換成同類題出），其餘留到下一輪或「錯題重考」 */
+      const cap=Math.min(REDO_N,Math.max(1,Math.floor(per/3))), dueP=due.slice(0,cap);
       /* 有會考歷屆題的科目，每輪至少一半是真題：沒做過的先出，都做過就出最久沒做的 */
       const nx=Math.max(0,Math.ceil(per/2)-dueP.filter(q=>q.x).length);
       const xs=[...fresh.filter(q=>q.x),...rest.filter(q=>q.x)].slice(0,nx);
       const pick=[...new Set([...dueP,...xs,...fresh,...rest,...due.slice(cap)])].slice(0,per);
-      qs.push(...pick.map(q=>mk(q,!!state.cards[q.id])));
+      qs.push(...withTwins(pick));
     }
   }
   session={qs,i:0,res:[],picked:null,fastRun:0,fastN:0,t0:0,t0i:-1};
@@ -792,9 +832,9 @@ function buildSession(){
 
 function picker(){
   const nw=Object.keys(state.cards).length;
-  const opts=[...ORDER.map(s=>[s,SUBJ[s].n,SUBJ[s].c]),["wrong",`錯題複習（${nw}）`,"var(--bad)"]];
+  const opts=[...ORDER.map(s=>[s,SUBJ[s].n,SUBJ[s].c]),["wrong",`錯題重考 ${Math.min(REDO_N,nw)} 題`,"var(--bad)"]];
   const node=el(`<div class="pick-row" role="group" aria-label="選擇科別">${opts.map(([k,n,c])=>`<button class="chip" data-m="${k}" aria-pressed="${mode===k}" style="--c:${c}" ${k==="wrong"&&!nw?"disabled":""}>${n}</button>`).join("")}</div>`);
-  node.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{mode=b.dataset.m;buildSession();renderPlay()});
+  node.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{mode=b.dataset.m;if(mode==="wrong")wrongSub="all";buildSession();renderPlay()});
   return node;
 }
 
@@ -853,9 +893,9 @@ function renderPlay(){
   paintGoal();
   if(!session)buildSession();
   const {qs,i,res}=session;
-  if(!qs.length){view.replaceChildren(picker(),el(`<section class="sheet center"><h2>目前沒有待複習的錯題</h2><p>做錯或按「我不會」的題目會自動收進這裡。</p></section>`));return}
+  if(!qs.length){view.replaceChildren(picker(),el(`<section class="sheet center"><h2>目前沒有待重考的錯題</h2><p>做錯或按「我不會」的題目會自動收進錯題本。</p></section>`));return}
   if(i>=qs.length)return renderDone();
-  const {q,again,ord}=qs[i], s=SUBJ[q.s], p=session.picked, done=p!==null;
+  const {q,again,of,ord}=qs[i], s=SUBJ[q.s], p=session.picked, done=p!==null;
   if(!done&&session.t0i!==i){session.t0=performance.now();session.t0i=i}
   const strip=qs.map((_,k)=>`<span class="${k<i?(res[k]?'ok':'bad'):k===i?'now':''}"></span>`).join("");
   const opts=ord.map((oi,pos)=>{let c="opt";if(done){if(oi===q.a)c+=" right";else if(oi===p)c+=" wrong pick"}
@@ -866,7 +906,7 @@ function renderPlay(){
   const node=el(`<section class="sheet">
     ${showPick?'':'<button class="back" id="back">← 換科目</button>'}
     <div class="strip" style="grid-template-columns:repeat(${qs.length},1fr)">${strip}</div>
-    <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.x?`<span class="lv2">${q.x} 會考</span>`:q.lv===2?'<span class="lv2">會考型</span>':''}${again?'<span class="again">↻ 錯題再練</span>':''}</span><span class="num">第 ${i+1} / ${qs.length} 題</span></div>
+    <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.x?`<span class="lv2">${q.x} 會考</span>`:q.lv===2?'<span class="lv2">會考型</span>':''}${again?`<span class="again" title="和之前錯的題目考同一個觀念，但換了一題">↻ ${of&&of!==q.id?'換題重考':'錯題再練'}</span>`:''}</span><span class="num">第 ${i+1} / ${qs.length} 題</span></div>
     ${session.fastRun>=3&&!done?'<div class="slow">慢慢來，把題目看完再選，答對比答快重要。</div>':''}
     ${q.ps?`<div class="passage">${esc(q.ps)}</div>`:''}
     ${q.au?`<div class="listen">${canSpeak?`<button class="next" id="play">▶ 播放</button><button class="tab" id="slow">慢速播放</button><span class="note">${/^(M|W):/m.test(q.au)?"男女對話":voiceFor(q.id)==="m"?"男聲":"女聲"}</span>`:`<span class="note">這台裝置不能播放聲音，請看句子作答：</span><b lang="en">${esc(q.au)}</b>`}${done&&canSpeak?`<span class="say" lang="en">${esc(q.au)}</span>`:''}</div>`:''}
@@ -874,7 +914,7 @@ function renderPlay(){
     <p class="q">${esc(q.t)}</p>
     <div class="opts">${opts}</div>
     ${done?'':'<button class="dunno" id="dunno">我不會，直接看解析</button>'}
-    ${done?`<div class="explain ${p===q.a?'':'no'}"><b>${verdict}</b><span>${esc(q.e)}</span></div><button class="next" id="next">${i+1<qs.length?'下一題':'看這一輪的成績'}</button>`:''}
+    ${done?`<div class="explain ${p===q.a?'':'no'}"><b>${verdict}</b><span>${esc(q.e)}</span>${session.redoMsg?`<span class="redo">${session.redoMsg}</span>`:''}</div><button class="next" id="next">${i+1<qs.length?'下一題':'看這一輪的成績'}</button>`:''}
   </section>`);
   node.querySelectorAll(".opt").forEach(b=>b.onclick=()=>answer(+b.dataset.oi));
   node.querySelector("#dunno")?.addEventListener("click",()=>answer(-1));
@@ -886,14 +926,20 @@ function renderPlay(){
 }
 
 function answer(k){
-  const {q}=session.qs[session.i], ok=k===q.a, t=today(), id=q.id;
+  const {q,of}=session.qs[session.i], ok=k===q.a, t=today(), id=q.id;
   const sec=Math.round((performance.now()-session.t0)/100)/10;
   const fast=k!==-1&&sec<(q.ps?6:3);
   session.fastRun=fast?session.fastRun+1:0; if(fast)session.fastN++;
   session.picked=k; session.res[session.i]=ok;
-  state.seen[id]=1;
-  if(ok){const c=state.cards[id];if(c){c.box++;if(c.box>=BOXDAYS.length)delete state.cards[id];else c.due=addDays(t,BOXDAYS[c.box])}}
-  else state.cards[id]={box:0,due:addDays(t,1)};
+  state.seen[id]=1; session.redoMsg="";
+  /* 換題重考的成績算在原本那張錯題上，換來的題目本身不另外收進錯題本 */
+  const cid=of||id, c=state.cards[cid];
+  if(of&&c&&of!==id&&!(c.tw||[]).includes(id))(c.tw=c.tw||[]).push(id);
+  if(ok){if(c){c.box++;
+      if(c.box>=BOXDAYS.length){delete state.cards[cid];session.redoMsg="🎉 這個錯題的觀念已經連續過關 3 次，從錯題本畢業了！"}
+      else{c.due=addDays(t,BOXDAYS[c.box]);session.redoMsg=`錯題重考過關（${c.box}/${BOXDAYS.length}），${BOXDAYS[c.box]} 天後再考一題同類的。`}}}
+  else if(c){c.box=0;c.due=addDays(t,BOXDAYS[0]);if(of)session.redoMsg=`這個觀念還不熟，${BOXDAYS[0]} 天後換一題再考。`}
+  else state.cards[id]={box:0,due:addDays(t,BOXDAYS[0]),at:t};
   const L=state.log[t]||(state.log[t]={n:0,c:0,by:{}});
   const pt=ok&&!fast&&!state.hist.some(x=>x.d===t&&x.id===id&&x.ok)?(q.x?2:1):0;
   if(pt)L.pt=(L.pt||0)+pt; session.pt=(session.pt||0)+pt;
@@ -901,7 +947,7 @@ function answer(k){
   const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
   if(!L.first)L.first=hm; L.last=hm;
   const b=L.by[q.s]||(L.by[q.s]=[0,0]); b[0]++; if(ok)b[1]++;
-  state.seq=(state.seq||0)+1; state.hist.push({d:t,h:hm,id,p:k,ok,sec,q:state.seq}); if(state.hist.length>1500)state.hist=state.hist.slice(-1500);
+  state.seq=(state.seq||0)+1; state.hist.push(Object.assign({d:t,h:hm,id,p:k,ok,sec,q:state.seq},of?{of}:{})); if(state.hist.length>1500)state.hist=state.hist.slice(-1500);
   unlocked(q.s);
   save(); renderPlay();
 }
@@ -913,7 +959,7 @@ function renderDone(){
     <div class="big">${c} / ${n}</div>
     <h2>${c===n?'全對！今天超強':c>=n*0.7?'做得很好，繼續保持':'完成了！每天做就會進步'}</h2>
     ${(()=>{const t=today(),g=goalOf(t),d=state.log[t]?.n||0;return d>=g?`<p>今天的目標 ${g} 題已完成，想多做可以再一輪。</p>`:`<p><b>今天還差 ${g-d} 題</b>達成目標（${g} 題）。</p>`})()}
-    <p>${mode==="wrong"?`還有 ${Object.keys(state.cards).length} 題待複習錯題。連續答對幾次就會移出錯題本。`:wrong?`答錯或不會的 ${wrong} 題，之後會再出現，也可以按「錯題複習」先練，記得看解析。`:'這一輪沒有錯題，明天會出新題目。'}</p>
+    <p>${mode==="wrong"?`錯題本還有 ${Object.keys(state.cards).length} 題。每題換同類題連續過關 3 次就畢業。`:wrong?`答錯或不會的 ${wrong} 題收進錯題本了，${BOXDAYS[0]} 天後會換一題同類的再考，不會出一樣的題目。記得看解析。`:'這一輪沒有錯題，明天會出新題目。'}</p>
     ${session.pt?`<p>這一輪拿到 <b>${session.pt}</b> 點獎勵點數。</p>`:''}
     ${rwBox(false)}
     ${session.fastN>=3?`<p class="slow">這一輪有 ${session.fastN} 題作答很快，下次可以把題目看完再選。</p>`:''}
@@ -964,7 +1010,7 @@ function renderProg(){
     ${rwBox(true)}
     ${state.rw.length?`<p class="note">兌換紀錄：${state.rw.slice().reverse().map(r=>`${md(r.d)} ${r.k==="cash"?"20 元":"卡包"}`).join("、")}（共 ${state.rw.length} 次）</p>`:''}
     <p class="note">答對 1 題 1 點，會考真題 2 點；不到 3 秒的快答不算，同一題同一天重複答對只算一次。</p>
-    ${wrongNow?`<button class="next" id="reviewAll" style="align-self:stretch">複習全部錯題（${wrongNow} 題）</button>`:''}
+    ${wrongNow?`<button class="next" id="reviewAll" style="align-self:stretch">看錯題本（${wrongNow} 題）</button>`:''}
     <h2>最近 14 天每日題數</h2>
     <div><div class="days">${bars}</div><div class="dlab">${labs}</div></div>
     <h2>每日紀錄</h2>
@@ -981,12 +1027,12 @@ function renderProg(){
     <h2>題庫清單</h2>
     ${bankTable()}
     <p class="note">「會考」是歷屆真題（英文下方小字是其中的聽力題數），「—」表示還沒收錄；「自編類題」是依康軒單元自己出的題。新上傳的考題加進來後，這裡會自動多一行。</p>
-    <p class="note">${totN?`總答對率 ${Math.round(totC/totN*100)}%。`:'還沒有紀錄，做完第一輪就會出現。'}答錯的題目會在隔天、3 天後、7 天後再出現。題庫共 ${BANK.length} 題（基礎 ${BANK.filter(q=>q.lv===1).length}、會考型 ${BANK.filter(q=>q.lv===2).length}）。</p>
+    <p class="note">${totN?`總答對率 ${Math.round(totC/totN*100)}%。`:'還沒有紀錄，做完第一輪就會出現。'}答錯的題目收進錯題本，隔 2 天、4 天、7 天各換一題同類題重考，連續過關 3 次就畢業。題庫共 ${BANK.length} 題（基礎 ${BANK.filter(q=>q.lv===1).length}、會考型 ${BANK.filter(q=>q.lv===2).length}）。</p>
   </section>`);
   node.querySelectorAll("[data-rw]").forEach(b=>b.onclick=()=>{const k=b.dataset.rw;
     if(!confirm(`確定已經給他${k==="cash"?"零用錢 20 元":"寶可夢卡包 1 包"}了嗎？`))return;
     state.rw.push({d:t,k,at:Date.now()});save();paintGoal();renderProg()});
-  node.querySelector("#reviewAll")?.addEventListener("click",()=>{mode="wrong";buildSession();setTab("play")});
+  node.querySelector("#reviewAll")?.addEventListener("click",()=>setTab("book"));
   node.querySelectorAll(".lrow[data-d]").forEach(b=>b.onclick=()=>{histDay=b.dataset.d;renderProg();document.getElementById("hist").scrollIntoView({block:"start"})});
   node.querySelectorAll(".srow").forEach(b=>b.onclick=()=>{openSub=openSub===b.dataset.s?null:b.dataset.s;renderProg()});
   node.querySelectorAll("[data-unlock]").forEach(b=>b.onclick=()=>{state.up[b.dataset.unlock]="manual";save();if(session&&session.i===0&&session.picked===null)session=null;renderProg()});
@@ -1005,6 +1051,56 @@ function bankTable(){
   rows.push(`<tr class="sum"><th scope="row">合計</th>${ORDER.map(s=>`<td>${BANK.filter(q=>q.s===s).length}</td>`).join("")}</tr>`);
   return `<div class="tscroll"><table class="btable"><thead><tr><th>來源</th>${ORDER.map(s=>`<th style="color:${SUBJ[s].c}">${SUBJ[s].n}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
+function mediaHTML(q){
+  return `${q.ps?`<div class="passage small">${esc(q.ps)}</div>`:''}${q.img?[].concat(q.img).map(src=>`<a href="${esc(src)}" target="_blank" rel="noopener" title="點一下看大圖"><img class="qimg" src="${esc(src)}" alt="題目附圖" loading="lazy"></a>`).join(""):''}${q.au?`<div class="say" lang="en">🔊 ${esc(q.au)}</div>`:''}`;
+}
+
+/* ===== 錯題本：還沒畢業的錯題，顯示原題、他選的、正確答案、解析、換題重考的結果和下次重考日 ===== */
+let bookSub="all", bookAll=false;
+function renderBook(){
+  const t=today(), all=Object.keys(state.cards).filter(id=>BYID[id]);
+  const cnt={};for(const id of all){const s=BYID[id].s;cnt[s]=(cnt[s]||0)+1}
+  if(bookSub!=="all"&&!cnt[bookSub])bookSub="all";
+  const ids=all.filter(id=>bookSub==="all"||BYID[id].s===bookSub).sort((a,b)=>state.cards[a].due.localeCompare(state.cards[b].due)||(state.cards[b].at||"").localeCompare(state.cards[a].at||""));
+  const dueN=ids.filter(id=>state.cards[id].due<=t).length;
+  const lastWrong={}, redo={};
+  for(const x of state.hist){if(x.of){(redo[x.of]=redo[x.of]||[]).push(x)}else if(!x.ok)lastWrong[x.id]=x}
+  const redoOk=state.hist.filter(x=>x.of&&x.ok).length;
+  const units={};for(const id of ids){const q=BYID[id],k=(bookSub==="all"?SUBJ[q.s].n+"・":"")+q.u;units[k]=(units[k]||0)+1}
+  const topU=Object.entries(units).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const shown=bookAll?ids:ids.slice(0,20);
+  const chips=[["all","全部",all.length,"var(--mark)"],...ORDER.filter(s=>cnt[s]).map(s=>[s,SUBJ[s].n,cnt[s],SUBJ[s].c])];
+  const cards=shown.map(id=>{const q=BYID[id],c=state.cards[id],s=SUBJ[q.s],w=lastWrong[id],R=redo[id]||[];
+    const mine=!w?'':w.p===-1?'我不會':esc(q.o[w.p]);
+    const dots="●".repeat(c.box)+`<i>${"●".repeat(BOXDAYS.length-c.box)}</i>`;
+    return `<article class="hq bad">
+      <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span>${q.x?`<span class="lv2">${q.x} 會考</span>`:''}<span class="pill ${c.due<=t?'none':'part'}">${c.due<=t?'可以重考':md(c.due)+' 重考'}</span></span><span class="dots" title="換題重考過關 ${c.box} / ${BOXDAYS.length} 次">${dots}</span></div>
+      ${mediaHTML(q)}
+      <p class="hqq">${esc(q.t)}</p>
+      <div class="hans">${w?`<span>他選：<b class="tbad">${mine}</b>（${md(w.d)}）</span>`:''}<span>正確：<b class="tok">${esc(q.o[q.a])}</b></span></div>
+      <div class="hexp">${esc(q.e)}</div>
+      ${R.length?`<div class="redo">換題重考：${R.slice(-6).map(x=>`${md(x.d)} ${x.ok?'<b class="tok">✓</b>':'<b class="tbad">✗</b>'}`).join("、")}</div>`:''}
+    </article>`}).join("");
+  const node=el(`<section class="sheet">
+    <div class="stats">
+      <div class="stat"><b>${all.length}</b><span>錯題本題數</span></div>
+      <div class="stat"><b>${Object.values(state.cards).filter(c=>c.due<=t).length}</b><span>今天可重考</span></div>
+      <div class="stat"><b>${redoOk}</b><span>重考答對</span></div>
+    </div>
+    <p class="note">重考不會出一模一樣的題目，會從同一科同一單元挑一題觀念相近、最近沒做過的新題。隔 2 天、4 天、7 天各考一次，連續過關 3 次就畢業（●●● 是進度）。每天練習時會自動混進最多 ${REDO_N} 題，算在當天題數裡。</p>
+    ${all.length?`<button class="next" id="redo" style="align-self:stretch">換題重考 ${Math.min(REDO_N,ids.length)} 題${bookSub==="all"?'':`（${SUBJ[bookSub].n}）`}</button>`:''}
+    ${all.length?`<div class="pick-row" style="margin:0" role="group" aria-label="篩選科目">${chips.map(([k,n,c2,col])=>`<button class="chip" data-b="${k}" style="--c:${col}" aria-pressed="${bookSub===k}">${n} ${c2}</button>`).join("")}</div>`:''}
+    ${topU.length?`<h2>錯題最多的單元</h2><div class="ulist">${topU.map(([u,n])=>`<span>${esc(u)} <b>${n}</b></span>`).join("")}</div>`:''}
+    ${all.length?`<h2>錯題${dueN?`（${dueN} 題可以重考）`:''}</h2><div class="hist">${cards}</div>
+      ${ids.length>shown.length?`<button class="tab" id="bookAll" style="align-self:center">顯示全部 ${ids.length} 題</button>`:''}`
+      :`<h2>錯題本是空的</h2><p class="note">做錯或按「我不會」的題目會自動收進這裡。</p>`}
+  </section>`);
+  node.querySelectorAll("[data-b]").forEach(b=>b.onclick=()=>{bookSub=b.dataset.b;bookAll=false;renderBook()});
+  node.querySelector("#bookAll")?.addEventListener("click",()=>{bookAll=true;renderBook()});
+  node.querySelector("#redo")?.addEventListener("click",()=>{mode="wrong";wrongSub=bookSub;buildSession();setTab("play")});
+  view.replaceChildren(node);
+}
+
 function histHTML(){
   let h=state.hist.slice();
   if(histDay)h=h.filter(x=>x.d===histDay);
@@ -1015,19 +1111,20 @@ function histHTML(){
     const mine=x.p===-1?'我不會':`${esc(q.o[x.p])}`;
     return `<article class="hq ${x.ok?'ok':'bad'}">
       <div class="meta"><span class="tags"><span class="subj" style="background:${s.c}">${s.n}</span><span class="unit">${esc(q.u)}</span><b class="${x.ok?'tok':'tbad'}">${x.ok?'✓ 答對':x.p===-1?'？ 不會':'✗ 答錯'}</b></span><span class="num">${md(x.d)} ${x.h||''}${x.sec!=null?` · ${x.sec} 秒`:''}${x.sec!=null&&x.p!==-1&&x.sec<(q.ps?6:3)?' ⚡':''}</span></div>
-      ${q.ps?`<div class="passage small">${esc(q.ps)}</div>`:''}${q.img?[].concat(q.img).map(src=>`<a href="${esc(src)}" target="_blank" rel="noopener" title="點一下看大圖"><img class="qimg" src="${esc(src)}" alt="題目附圖" loading="lazy"></a>`).join(""):''}${q.au?`<div class="say" lang="en">🔊 ${esc(q.au)}</div>`:''}
+      ${mediaHTML(q)}
       <p class="hqq">${esc(q.t)}</p>
       <div class="hans"><span>他選：<b>${mine}</b></span>${x.ok?'':`<span>正確：<b class="tok">${esc(q.o[q.a])}</b></span>`}</div>
       <div class="hexp">${esc(q.e)}</div></article>`}).join("");
 }
 
 function setTab(t){
-  for(const k of ["play","prog","rep"])document.getElementById("tab-"+k).setAttribute("aria-selected",t===k);
+  for(const k of ["play","book","prog","rep"])document.getElementById("tab-"+k).setAttribute("aria-selected",t===k);
   if(canSpeak)try{speechSynthesis.cancel()}catch(e){}
-  t==="play"?renderPlay():t==="prog"?renderProg():renderRep();
+  t==="play"?renderPlay():t==="book"?renderBook():t==="prog"?renderProg():renderRep();
 }
 document.getElementById("tab-play").onclick=()=>setTab("play");
 document.getElementById("tab-prog").onclick=()=>setTab("prog");
+document.getElementById("tab-book").onclick=()=>setTab("book");
 document.getElementById("tab-rep").onclick=()=>setTab("rep");
 const themeBtn=document.getElementById("themeBtn");
 function paintThemeBtn(){const dark=document.documentElement.dataset.theme==="dark";themeBtn.textContent=dark?"☀️ 亮色":"🌙 暗色";themeBtn.setAttribute("aria-label",dark?"切換成亮色":"切換成暗色")}
@@ -1176,8 +1273,8 @@ async function pullRemote(){
     }
     try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){}
     await syncNow();
-    const cur=["play","prog","rep"].find(t=>document.getElementById("tab-"+t).getAttribute("aria-selected")==="true");
-    if(cur==="prog")renderProg();else if(cur==="rep")renderRep();else if(!session||(session.i===0&&session.picked===null)){session=null;renderPlay()}
+    const cur=["play","book","prog","rep"].find(t=>document.getElementById("tab-"+t).getAttribute("aria-selected")==="true");
+    if(cur==="prog")renderProg();else if(cur==="book")renderBook();else if(cur==="rep")renderRep();else if(!session||(session.i===0&&session.picked===null)){session=null;renderPlay()}
   }catch(e){note.textContent="現在連不到雲端，紀錄先存在這台裝置。"}
 }
 window.addEventListener("online",pullRemote);
@@ -1187,7 +1284,7 @@ document.addEventListener("visibilitychange",()=>{
   else if(Date.now()-lastPull>5*60*1000)pullRemote();
 });
 
-setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
+setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":location.hash==="#wrong"?"book":"play");
 pullRemote();
 </script>
 </body>
