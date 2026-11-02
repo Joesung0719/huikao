@@ -182,6 +182,26 @@ a+a>.qimg{margin-top:8px}
 .wk{flex:1;max-width:90px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:2px;min-width:0}
 .wk i{display:block;width:70%;background:var(--mark);border-radius:2px 2px 0 0}
 .wk .num{font-size:.8rem}.wl,.wn{font-size:.7rem;color:var(--muted);white-space:nowrap}
+/* 英文家教週報（?tutor） */
+body.tutor .cd,body.tutor header,body.tutor #saveNote{display:none!important}
+.tut ol.todo{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:6px}
+.tut details summary{cursor:pointer;color:var(--muted);font-size:.9rem;font-weight:700}
+.tut details .passage{margin-top:6px}
+ol.tops{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:.98rem}
+ol.tops li{display:flex;gap:8px;align-items:baseline}
+ol.tops .ot{flex:1;min-width:0}
+ol.tops li>b{white-space:nowrap;font-size:.88rem}
+.tut .rtable{min-width:0}
+.tut .rtable td:nth-child(3){min-width:0}
+.tut .rbar{width:3.5em}
+.wgrp{margin:8px 0 0;font-size:1rem;color:var(--s-eng)}
+ol.tops .bub{height:1.25em;width:1.9em;font-size:.75rem;border-color:var(--muted);color:var(--muted)}
+ol.tops li.right{color:var(--ok)} ol.tops li.right .bub{border-color:var(--ok);color:var(--ok)}
+ol.tops li.mine{color:var(--bad)} ol.tops li.mine .bub{border-color:var(--bad);color:var(--bad)}
+.tutlink{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1.5px dashed var(--line);border-radius:6px;padding:8px 12px;font-size:.95rem}
+.tutlink span{margin-right:auto}
+.tutlink a.tab{text-decoration:none}
+@media print{.tut details>*{display:block}.hq{break-inside:avoid}}
 @media print{
   body{background:#fff;color:#000;font-size:12pt}
   .noprint,#saveNote{display:none!important}
@@ -218,6 +238,8 @@ a+a>.qimg{margin-top:8px}
 /* ===== 設定：部署 Apps Script 後，把網址貼在這裡 ===== */
 const API_URL="https://script.google.com/macros/s/AKfycbzWeFgQpbEbA7GRWD1IGNptH5-xD7S_hVLdNrwTS1YAcwrQYBoB0fbJnDts4_JXiEfnbg/exec";           // 例：https://script.google.com/macros/s/xxxx/exec
 const API_KEY="12345";  // 要和 Apps Script 裡的 KEY 一樣
+/* 網址加 ?tutor 時是給英文家教看的唯讀週報，不同步、不寫入紀錄 */
+const TUTOR=/(^|[?&#])tutor\b/.test(location.search+location.hash);
 
 // 國文 [id, 單元, 程度(1基礎/2會考型), 題目, 選項, 答案索引, 解析, 附加]
 const BANK_CHI=[
@@ -1099,6 +1121,7 @@ function renderRep(){
     </div>
     <div class="noprint pick-row" style="margin:0">${subBtns}</div>
     <div class="noprint pick-row" style="margin:0">${rngBtns}</div>
+    ${repSub==="eng"?`<div class="noprint tutlink"><span>📝 給英文家教看的每週錯題頁（唯讀、只有英文）</span><a class="tab" href="?tutor" target="_blank" rel="noopener">打開</a><button class="tab" id="copyTut" type="button">複製連結</button></div>`:''}
     ${D.n?`
     <div class="stats six">
       <div class="stat"><b>${r}%</b><span>答對率</span></div>
@@ -1127,10 +1150,121 @@ function renderRep(){
   node.querySelectorAll("[data-rs]").forEach(b=>b.onclick=()=>{repSub=b.dataset.rs;renderRep()});
   node.querySelectorAll("[data-rr]").forEach(b=>b.onclick=()=>{repRange=+b.dataset.rr;renderRep()});
   node.querySelector("#printRep").onclick=()=>window.print();
+  const ct=node.querySelector("#copyTut");if(ct)ct.onclick=async()=>{const u=location.origin+location.pathname+"?tutor";
+    try{await navigator.clipboard.writeText(u);ct.textContent="已複製"}catch(e){prompt("複製這個連結傳給家教：",u)}setTimeout(()=>ct.textContent="複製連結",1800)};
   node.querySelector("#copyRep").onclick=async(ev)=>{const t=repText(D),btn=ev.currentTarget;
     try{await navigator.clipboard.writeText(t);btn.textContent="已複製"}catch(e){prompt("複製下面的文字：",t)}
     setTimeout(()=>btn.textContent="複製文字摘要",1800)};
   view.replaceChildren(node);
+}
+
+/* ===== 英文家教週報：網址後面加 ?tutor（例：…/huikao/?tutor）就是給家教看的唯讀頁 =====
+   只顯示英文最近 7 天：上課建議、聽力弱點、各單元、本週錯題（附聽力稿、他選的答案、解析）。不會寫入或同步任何紀錄。 */
+let tutEnd=null, tutNote="";
+const LT=["辨識句意","基本問答","言談理解"]; /* 會考聽力三種題型：看圖、選回應、聽對話或短文回答 */
+const ltype=q=>/圖/.test(q.t)?LT[0]:/回應/.test(q.t)?LT[1]:LT[2];
+const pct=h=>h.length?Math.round(h.filter(x=>x.ok).length/h.length*100):null;
+function trend(r,pr){if(r==null||pr==null)return "";const d=r-pr;return d>0?` <span class="tok">▲${d}</span>`:d<0?` <span class="tbad">▼${-d}</span>`:" <span class=\"note\">＝</span>"}
+function tutData(end){
+  const start=addDays(end,-6), pS=addDays(end,-13), pE=addDays(end,-7);
+  const E=state.hist.filter(x=>{const q=BYID[x.id];return q&&q.s==="eng"});
+  const W=E.filter(x=>x.d>=start&&x.d<=end), P=E.filter(x=>x.d>=pS&&x.d<=pE);
+  const grp=(h,key)=>{const m={};for(const x of h){const k=key(BYID[x.id]);(m[k]=m[k]||[]).push(x)}return m};
+  const uk=q=>q.au?"聽力":q.u;
+  const wu=grp(W,uk), pu=grp(P,uk);
+  const units=Object.keys(wu).map(u=>({u,n:wu[u].length,bad:wu[u].filter(x=>!x.ok).length,r:pct(wu[u]),pr:pu[u]?pct(pu[u]):null})).sort((a,b)=>b.bad-a.bad||a.r-b.r);
+  const isL=x=>!!BYID[x.id].au;
+  const wl=grp(W.filter(isL),ltype), pl=grp(P.filter(isL),ltype);
+  const listen=LT.map(k=>{const h=wl[k]||[];return {k,n:h.length,bad:h.filter(x=>!x.ok).length,r:pct(h),pr:pl[k]?pct(pl[k]):null}});
+  /* 本週錯題：同一題只列一次；「再錯」＝這題累計錯 2 次以上；「之後已答對」＝錯了之後又做對 */
+  const wm=new Map();
+  for(const x of W){if(x.ok)continue;const m=wm.get(x.id)||{id:x.id,q:BYID[x.id],n:0,picks:new Set(),last:x};m.n++;m.picks.add(x.p);m.last=x;wm.set(x.id,m)}
+  const order=Object.fromEntries(units.map((u,i)=>[u.u,i]));
+  const wrong=[...wm.values()].map(m=>{const all=E.filter(x=>x.id===m.id);
+    return Object.assign(m,{totBad:all.filter(x=>!x.ok).length,fixed:all.some(x=>x.ok&&(x.q||0)>(m.last.q||0))})})
+    .sort((a,b)=>(order[uk(a.q)]-order[uk(b.q)])||(b.totBad-a.totBad));
+  const R=W.filter(x=>!isL(x)), L=W.filter(isL);
+  return {start,end,W,P,units,listen,wrong,days:new Set(W.map(x=>x.d)).size,r:pct(W),pr:pct(P),rR:pct(R),nR:R.length,rL:pct(L),nL:L.length,
+    dk:W.filter(x=>x.p===-1).length,again:wrong.filter(m=>m.totBad>=2).length};
+}
+function tutTodo(D){
+  const t=[];
+  for(const u of D.units.filter(u=>u.u!=="聽力"&&u.n>=3&&u.bad>=2&&u.r<80).slice(0,3))
+    t.push(`<b>${esc(u.u)}</b>：本週錯 ${u.bad}/${u.n} 題（答對 ${u.r}%${u.pr!=null?`，前 7 天 ${u.pr}%`:''}）`);
+  const wl=D.listen.filter(l=>l.n>=3&&l.r<70).sort((a,b)=>a.r-b.r)[0];
+  if(wl)t.push(`聽力的<b>${wl.k}</b>最弱：答對 ${wl.r}%（${wl.n-wl.bad}/${wl.n}），下面錯題附聽力稿可以帶他再聽一次`);
+  if(D.again)t.push(`有 <b>${D.again} 題</b>已經錯 2 次以上（標「再錯」），代表觀念還沒通，建議上課直接講`);
+  if(D.dk)t.push(`按「我不會」${D.dk} 題：完全沒概念，比猜錯更需要先教`);
+  return t;
+}
+function tutText(D){
+  let s=`【英文家教週報】${md(D.start)}–${md(D.end)}\n練習 ${D.days} 天、${D.W.length} 題，答對 ${D.r??0}%`+(D.pr!=null?`（前 7 天 ${D.pr}%）`:"");
+  if(D.nR)s+=`\n閱讀／文法 ${D.rR}%（${D.nR} 題）`; if(D.nL)s+=`，聽力 ${D.rL}%（${D.nL} 題）`;
+  const todo=tutTodo(D).map(x=>"・"+x.replace(/<[^>]+>/g,""));
+  if(todo.length)s+="\n上課建議：\n"+todo.join("\n");
+  s+="\n詳細錯題："+location.origin+location.pathname+"?tutor";
+  return s;
+}
+function renderTutor(){
+  const D=tutData(tutEnd), t=today();
+  const todo=tutTodo(D);
+  const optsL=m=>`<ol class="tops">${m.q.o.map((o,i)=>`<li class="${i===m.q.a?'right':m.picks.has(i)?'mine':''}"><span class="bub">${ABCD[i]}</span><span class="ot">${esc(o)}</span>${i===m.q.a?'<b>✓ 正解</b>':m.picks.has(i)?'<b>✗ 他選</b>':''}</li>`).join("")}${m.picks.has(-1)?'<li class="mine"><b>？ 他按了「我不會」</b></li>':''}</ol>`;
+  const card=m=>{const q=m.q;return `<article class="hq bad">
+    <div class="meta"><span class="tags"><span class="unit">${q.au?esc(ltype(q)):esc(q.u)}</span>${q.x?`<span class="unit">${esc(q.x)} 會考</span>`:''}${m.totBad>=2?`<span class="lv2">再錯 ${m.totBad} 次</span>`:''}${m.fixed?'<b class="tok">之後已答對 ✓</b>':''}</span><span class="num">${md(m.last.d)}${m.n>1?` · 本週錯 ${m.n} 次`:''}</span></div>
+    ${q.ps?`<details><summary>看文章</summary><div class="passage small">${esc(q.ps)}</div></details>`:''}
+    ${q.img?[].concat(q.img).map(src=>`<a href="${esc(src)}" target="_blank" rel="noopener"><img class="qimg" src="${esc(src)}" alt="題目附圖" loading="lazy"></a>`).join(""):''}
+    ${q.au?`<div class="say" lang="en">🔊 ${esc(q.au)}</div>${canSpeak?`<button class="tab noprint" data-say="${esc(q.id)}" type="button" style="align-self:flex-start">朗讀聽力稿</button>`:''}`:''}
+    <p class="hqq">${esc(q.t)}</p>${optsL(m)}
+    <div class="hexp">${esc(q.e)}</div></article>`};
+  const urows=D.units.map(u=>`<tr><th scope="row">${esc(u.u)}</th><td class="num">${u.n}</td><td class="num">${u.bad}</td><td><div class="rbar"><i style="width:${u.r}%;background:${u.r<60?'var(--bad)':'var(--s-eng)'}"></i></div><span class="num">${u.r}%</span>${trend(u.r,u.pr)}</td></tr>`).join("");
+  const lrows=D.listen.map(l=>`<tr><th scope="row">${l.k}</th><td class="num">${l.n}</td><td class="num">${l.n?l.bad:''}</td><td>${l.r==null?'<span class="note">這週沒做</span>':`<div class="rbar"><i style="width:${l.r}%;background:${l.r<60?'var(--bad)':'var(--s-eng)'}"></i></div><span class="num">${l.r}%</span>${trend(l.r,l.pr)}`}</td></tr>`).join("");
+  const node=el(`<section class="sheet report tut">
+    <div class="rep-head">
+      <div><h2>英文家教週報</h2><p class="note">${md(D.start)}（${"日一二三四五六"[new Date(D.start+"T12:00:00").getDay()]}）至 ${md(D.end)}（${"日一二三四五六"[new Date(D.end+"T12:00:00").getDay()]}）・最近 7 天的英文練習${tutNote?`・${tutNote}`:''}</p></div>
+      <div class="noprint btn-row" style="justify-content:flex-end"><button class="tab" id="tCopy">複製文字摘要</button><button class="next" id="tPrint">列印／存成 PDF</button></div>
+    </div>
+    <div class="noprint btn-row" style="justify-content:flex-start"><button class="chip" id="tPrev" style="--c:var(--mark)">‹ 前 7 天</button><button class="chip" id="tNext" style="--c:var(--mark)" ${tutEnd>=t?'disabled':''}>後 7 天 ›</button>${tutEnd<t?'<button class="chip" id="tNow" style="--c:var(--mark)">回到最近 7 天</button>':''}</div>
+    ${D.W.length?`
+    <div class="stats six">
+      <div class="stat"><b>${D.r}%</b><span>答對率${D.pr!=null?`（前 7 天 ${D.pr}%）`:''}</span></div>
+      <div class="stat"><b>${D.W.length}</b><span>英文題數</span></div>
+      <div class="stat"><b>${D.days}</b><span>練習天數</span></div>
+      <div class="stat"><b>${D.rR==null?'—':D.rR+'%'}</b><span>閱讀／文法（${D.nR} 題）</span></div>
+      <div class="stat"><b>${D.rL==null?'—':D.rL+'%'}</b><span>聽力（${D.nL} 題）</span></div>
+      <div class="stat"><b>${D.wrong.length}</b><span>錯題（不重複）</span></div>
+    </div>
+    <h3>上課建議先看</h3>
+    ${todo.length?`<ol class="todo">${todo.map(x=>`<li>${x}</li>`).join("")}</ol>`:'<p class="note">這週沒有特別集中的弱點，可以照原本進度上課，或挑下面的錯題講。</p>'}
+    <h3>聽力弱點</h3>
+    <div class="tscroll"><table class="rtable"><thead><tr><th>會考聽力題型</th><th>題數</th><th>錯</th><th>答對率（比前 7 天）</th></tr></thead><tbody>${lrows}</tbody></table></div>
+    <h3>各單元</h3>
+    <div class="tscroll"><table class="rtable"><thead><tr><th>單元</th><th>題數</th><th>錯</th><th>答對率（比前 7 天）</th></tr></thead><tbody>${urows}</tbody></table></div>
+    <p class="note">錯最多的單元排在前面。▲▼ 是和前 7 天比的增減（百分點）。</p>
+    <h3>本週錯題（${D.wrong.length} 題）</h3>
+    ${D.wrong.length?`<div class="hist">${D.wrong.map((m,i,a)=>{const g=m.q.au?"聽力":m.q.u,pg=i?(a[i-1].q.au?"聽力":a[i-1].q.u):null;
+      return (g!==pg?`<h4 class="wgrp">${esc(g)}（${a.filter(x=>(x.q.au?"聽力":x.q.u)===g).length} 題）</h4>`:'')+card(m)}).join("")}</div>
+    <p class="note">「再錯」是這題累計錯 2 次以上；「之後已答對」是錯了之後又做對。綠色是正解，紅色是他選的答案。</p>`:'<p class="note">這週英文全對，沒有錯題。</p>'}
+    `:`<p class="note">這 7 天沒有英文的作答紀錄。</p>`}
+  </section>`);
+  node.querySelector("#tPrev").onclick=()=>{tutEnd=addDays(tutEnd,-7);renderTutor()};
+  node.querySelector("#tNext").onclick=()=>{const n=addDays(tutEnd,7);tutEnd=n>t?t:n;renderTutor()};
+  const now=node.querySelector("#tNow");if(now)now.onclick=()=>{tutEnd=t;renderTutor()};
+  node.querySelector("#tPrint").onclick=()=>{node.querySelectorAll("details").forEach(d=>d.open=true);window.print()};
+  node.querySelector("#tCopy").onclick=async ev=>{const s=tutText(D),btn=ev.currentTarget;
+    try{await navigator.clipboard.writeText(s);btn.textContent="已複製"}catch(e){prompt("複製下面的文字：",s)}
+    setTimeout(()=>btn.textContent="複製文字摘要",1800)};
+  node.querySelectorAll("[data-say]").forEach(b=>b.onclick=()=>{const q=BYID[b.dataset.say];if(q)speak(q.au,0.9,q.id)});
+  view.replaceChildren(node);
+}
+async function tutorBoot(){
+  document.body.classList.add("tutor"); document.title="英文家教週報";
+  tutEnd=today(); tutNote="讀取最新紀錄中…"; renderTutor();
+  tutNote="";
+  if(API_URL){try{const j=await (await fetch(API_URL+"?key="+encodeURIComponent(API_KEY))).json();
+    if(j.state){const d=normalize(j.state);const byQ=new Map();for(const x of [...d.hist,...state.hist])byQ.set(x.d+"|"+x.h+"|"+x.id+"|"+x.q,x);
+      state.hist=[...byQ.values()].sort((a,b)=>(a.d+a.h).localeCompare(b.d+b.h))}
+  }catch(e){tutNote="現在連不到雲端，只顯示這台裝置上的紀錄"}}
+  renderTutor();
 }
 
 /* ===== 雲端同步（Google Apps Script） ===== */
@@ -1140,9 +1274,9 @@ function rowsToSend(){
     return {q:x.q,d:x.d,h:x.h,s:SUBJ[q.s].n,u:q.u,lv:q.lv===2?"會考型":"基礎",id:x.id,t:(q.au?"[聽力] "+q.au+" ／ ":"")+q.t,
       p:x.p===-1?"我不會":q.o[x.p],a:q.o[q.a],ok:x.ok?"對":x.p===-1?"不會":"錯",sec:x.sec}});
 }
-function scheduleSync(){if(!API_URL)return;clearTimeout(syncTimer);syncTimer=setTimeout(syncNow,1500)}
+function scheduleSync(){if(!API_URL||TUTOR)return;clearTimeout(syncTimer);syncTimer=setTimeout(syncNow,1500)}
 async function syncNow(){
-  if(!API_URL)return;
+  if(!API_URL||TUTOR)return;
   /* 上一次同步還沒回來時，記下來等它結束再補傳，不然最後幾題會漏傳 */
   if(syncing){syncAgain=true;return}
   syncing=true;syncAgain=false;clearTimeout(syncTimer);
@@ -1157,6 +1291,7 @@ async function syncNow(){
   if(syncAgain)syncNow();
 }
 async function pullRemote(){
+  if(TUTOR)return;
   if(!API_URL){note.textContent="紀錄存在這台裝置上（還沒設定雲端同步）。";return}
   lastPull=Date.now();
   try{
@@ -1187,8 +1322,9 @@ document.addEventListener("visibilitychange",()=>{
   else if(Date.now()-lastPull>5*60*1000)pullRemote();
 });
 
-setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
-pullRemote();
+if(TUTOR)tutorBoot();
+else{setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
+pullRemote();}
 </script>
 </body>
 </html>
