@@ -1315,6 +1315,8 @@ async function pullRemote(){
     if(cur==="prog")renderProg();else if(cur==="rep")renderRep();else if(!session||(session.i===0&&session.picked===null)){session=null;renderPlay()}
   }catch(e){note.textContent="現在連不到雲端，紀錄先存在這台裝置。"}
 }
+/* 家教週報模式：等下面的畫面初始化跑完再換成週報（pullRemote 在週報模式不做事） */
+if(TUTOR)setTimeout(tutorBoot);
 window.addEventListener("online",pullRemote);
 /* 分頁放著沒關、隔天再打開時，先抓雲端最新紀錄合併，避免舊資料蓋掉今天做的題；切走時立刻補傳 */
 document.addEventListener("visibilitychange",()=>{
@@ -1322,9 +1324,8 @@ document.addEventListener("visibilitychange",()=>{
   else if(Date.now()-lastPull>5*60*1000)pullRemote();
 });
 
-if(TUTOR)tutorBoot();
-else{setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
-pullRemote();}
+setTab(location.hash==="#report"?"rep":location.hash==="#progress"?"prog":"play");
+pullRemote();
 </script>
 </body>
 </html>
