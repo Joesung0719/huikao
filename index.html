@@ -803,7 +803,7 @@ function picker(){
 
 /* 點錯科目時回到選科：已作答的題目每題都已存好並會同步，沒做的不算 */
 function renderPick(){
-  if(canSpeak)try{speechSynthesis.cancel()}catch(e){}
+  stopSpeak();
   session=null;
   view.replaceChildren(picker(),el(`<section class="sheet center"><h2>要練哪一科？</h2><p>點上面的按鈕開始。剛才做過的題目已經記錄下來了。</p></section>`));
   window.scrollTo({top:0});
@@ -834,21 +834,46 @@ const SPEEDS=[0.6,0.8,1],SPD_KEY="huikao-listen-speed";
 function getSpeed(){try{const v=parseFloat(localStorage.getItem(SPD_KEY));if(SPEEDS.includes(v))return v}catch(e){}return 0.8}
 function setSpeed(v){try{localStorage.setItem(SPD_KEY,v)}catch(e){}}
 function voiceFor(id){const n=parseInt(String(id).replace(/\D/g,""),10)||0;const want=n%2?"f":"m";return VOICES[want]?want:(VOICES.f?"f":VOICES.m?"m":null)}
+/* 逐段朗讀：每段念完才排下一段，段與段之間用 setTimeout 明確停頓（句與句、換人說話、逗號處），語速越慢停越久 */
+let spkTok=0;
+function stopSpeak(){spkTok++;if(canSpeak)try{speechSynthesis.cancel()}catch(e){}}
 function speak(text,rate,id){
   if(!canSpeak)return;
-  try{speechSynthesis.cancel();if(!VOICES.f&&!VOICES.m)pickVoices();
-    const k0=voiceFor(id);
+  try{stopSpeak();const tok=spkTok;if(!VOICES.f&&!VOICES.m)pickVoices();
+    const k0=voiceFor(id), f=0.9/Math.max(rate,0.5), items=[];
+    let prevK=null;
     /* 會考聽力稿一行一句，M:／W: 分別用男聲、女聲念，Question: 用旁白的聲音 */
     for(const line of text.split("\n")){
       const m=line.match(/^(M|W|Question):\s*(.*)$/), seg=m?m[2]:line;
       const k=m&&m[1]!=="Question"&&VOICES[m[1]==="M"?"m":"f"]?(m[1]==="M"?"m":"f"):k0;
-      /* 慢速：語速放慢，並把句子切成 2～3 個字一組，每組之間自然停頓（部分高品質語音不太理會語速設定） */
-      const words=seg.split(/\s+/), parts=[];
-      if(rate<0.8){for(let w=0;w<words.length;w+=words.length<=4?2:3)parts.push(words.slice(w,w+(words.length<=4?2:3)).join(" "))}else parts.push(seg);
-      for(const t of parts){const u=new SpeechSynthesisUtterance(t);u.lang="en-US";u.rate=rate;
-        if(k&&VOICES[k]){u.voice=VOICES[k];u.lang=VOICES[k].lang}
-        speechSynthesis.speak(u)}
+      const label=m&&m[1]==="Question";
+      /* 換人說話停久一點；Question: 前面再多停一下 */
+      if(items.length)items[items.length-1].gap=(label?1100:prevK!==k?850:550)*f;
+      prevK=k;
+      /* 先依句號／問號／驚嘆號切句，再依逗號、分號切成子句，最後慢速時再切成 2～3 字一組 */
+      for(const sen of seg.split(/(?<=[.?!])\s+/).filter(Boolean)){
+        const clauses=sen.split(/(?<=[,;:])\s+/).filter(Boolean);
+        clauses.forEach((cl,ci)=>{
+          const words=cl.split(/\s+/), chunks=[];
+          if(rate<0.8&&words.length>2){const n=words.length<=4?2:3;for(let w=0;w<words.length;w+=n)chunks.push(words.slice(w,w+n).join(" "))}else chunks.push(cl);
+          chunks.forEach((t,ti)=>{
+            const last=ti===chunks.length-1, endClause=last&&ci===clauses.length-1;
+            items.push({t,k,gap:(endClause?520:last?260:140)*f})})});
+      }
     }
+    if(items.length)items[items.length-1].gap=0;
+    let i=0;
+    const next=()=>{
+      if(tok!==spkTok||i>=items.length)return;
+      const it=items[i++], u=new SpeechSynthesisUtterance(it.t);u.lang="en-US";u.rate=rate;
+      if(it.k&&VOICES[it.k]){u.voice=VOICES[it.k];u.lang=VOICES[it.k].lang}
+      let moved=false;
+      const go=()=>{if(moved||tok!==spkTok)return;moved=true;setTimeout(next,it.gap)};
+      u.onend=go;u.onerror=go;
+      /* 有些瀏覽器不觸發 onend：保險計時，過久就自動往下 */
+      setTimeout(go,3000+it.t.length*260/Math.max(rate,0.5));
+      speechSynthesis.speak(u)};
+    next();
   }catch(e){}
 }
 
@@ -1033,7 +1058,7 @@ function histHTML(){
 
 function setTab(t){
   for(const k of ["play","prog","rep"])document.getElementById("tab-"+k).setAttribute("aria-selected",t===k);
-  if(canSpeak)try{speechSynthesis.cancel()}catch(e){}
+  stopSpeak();
   t==="play"?renderPlay():t==="prog"?renderProg():renderRep();
 }
 document.getElementById("tab-play").onclick=()=>setTab("play");
