@@ -1212,7 +1212,7 @@ async function pullRemote(){
     try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){}
     await syncNow();
     const cur=["play","prog","rep"].find(t=>document.getElementById("tab-"+t).getAttribute("aria-selected")==="true");
-    if(cur==="prog")renderProg();else if(cur==="rep")renderRep();else if(!session||(session.i===0&&session.picked===null)){session=null;renderPlay()}
+    if(cur==="prog")renderProg();else if(cur==="rep")renderRep();else if(!session)renderPlay();else paintGoal(); /* 已經在做題就不要換題：以前重整後雲端同步完會把還沒作答的第一題換掉，聽到一半就跳題 */
   }catch(e){note.textContent="現在連不到雲端，紀錄先存在這台裝置。"}
 }
 window.addEventListener("online",pullRemote);
